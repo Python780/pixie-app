@@ -1,6 +1,6 @@
 {
-    "name": "pixel",
-    "short_name": "pixel",
+    "name": "pixie",
+    "short_name": "pixie",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

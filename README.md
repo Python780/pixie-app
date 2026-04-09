@@ -1,2 +1,2 @@
-# Pixel
-An user interface app for our robot pet companion Pixel.
+# pixie
+An user interface app for our robot pet companion pixie.
