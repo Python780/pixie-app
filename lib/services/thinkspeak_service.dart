@@ -17,3 +17,9 @@ void initPixieEar() async {
     );
   }
 }
+
+Future<void> triggerVision() async {
+  // This function will be called when "Hi Pixie" is detected
+  // You can add any additional logic here if needed
+  print("Pixie Ear Triggered: Activating Vision");
+}

@@ -4,10 +4,9 @@ import 'firebase_service.dart'; // Ensure this matches your filename
 
 class GeminiService {
   // Initialize the 2026 Gemini 3 Flash model
-  final _model = FirebaseAI.instance.googleAI(
-    modelName: 'gemini-3-flash',
-    apiKey: 'AIzaSyCeCrpXzz89taPkOOaZeOt28pvUxdtOAd8',
-  );
+  final _model = FirebaseAI.googleAI().generativeModel(
+    model: 'gemini-3-flash'
+    );
 
   final FirebaseService _dbService = FirebaseService();
 
@@ -20,7 +19,7 @@ class GeminiService {
           TextPart(
             "Analyze this face as Pixie the Robot. Reply in 1 short sentence with an emotion in (brackets).",
           ),
-          DataPart('image/jpeg', imageBytes),
+          InlineDataPart('image/jpeg', imageBytes),
         ]),
       ];
 

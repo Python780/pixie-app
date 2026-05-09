@@ -8,6 +8,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:19083732054:android:c39934f7127e9156aec7f7",
+        "android_client_info": {
+          "package_name": "com.example.pixie"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAid0VAxuzzIdhD587-Fzn6WFCzxAG6T_c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:19083732054:android:122fefe31654a03aaec7f7",
         "android_client_info": {
           "package_name": "com.example.pixieai"
