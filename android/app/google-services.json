@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "19083732054",
+    "firebase_url": "https://pixie-adff5-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "pixie-adff5",
+    "storage_bucket": "pixie-adff5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:19083732054:android:122fefe31654a03aaec7f7",
+        "android_client_info": {
+          "package_name": "com.example.pixieai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAid0VAxuzzIdhD587-Fzn6WFCzxAG6T_c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

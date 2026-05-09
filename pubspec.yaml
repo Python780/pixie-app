@@ -34,6 +34,14 @@ dependencies:
   intl: ^0.18.1
   url_launcher: ^6.2.0
   flutter_joystick: ^0.2.2
+  #hou implementation for Gemini Api
+  dependencies:
+  firebase_core: ^3.12.1
+  firebase_ai: ^3.9.0             # 2026 Gemini Logic SDK
+  flutter_voice_processor: ^2.1.0 # High-efficiency Mic listener
+  speech_to_text: ^7.0.0          # Secondary transcriber
+  camera: ^0.11.0
+  flutter_tts: ^4.0.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
