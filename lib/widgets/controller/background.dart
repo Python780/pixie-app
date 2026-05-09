@@ -11,7 +11,7 @@ class StarryBackground extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             Color(0xFF0A0F1F), // 深蓝黑
-            Color(0xFF101A3A), // 偏亮蓝
+            Color.fromARGB(255, 21, 33, 75), // 偏亮蓝
           ],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
@@ -37,10 +37,10 @@ class StarPainter extends CustomPainter {
     // 1. 基础明亮度：调高基础透明度
     final double opacity = (animationValue * 0.7) + 0.3; // 确保最暗时也不完全消失
 
-    // 2. 核心白点画笔
+    // 2. star
     final mainPaint = Paint()..color = Colors.white.withOpacity(opacity);
 
-    // 3. 外发光画笔 (这是变亮的关键！)
+    // 3. glowing
     final glowPaint = Paint()
       ..color = Colors.white.withOpacity(opacity * 0.5)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3); // 添加模糊边缘
@@ -51,7 +51,7 @@ class StarPainter extends CustomPainter {
       double dy = (star.dy + (animationValue * 0.02)) % 1.0; // 向下慢移
       
       final pos = Offset(dx * size.width, dy * size.height);
-      
+
       // 先画一层大的模糊光晕
       canvas.drawCircle(pos, 2.5, glowPaint); 
       // 再画中心的小亮点
