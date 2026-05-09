@@ -1,20 +1,21 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'dart:developer' as dev;
 import '../services/gemini_service.dart';
 import '../services/voice_trigger_service.dart';
-import '../services/firebase_service.dart';
 
 class FaceScreen extends StatefulWidget {
+  const FaceScreen({super.key});
+
   @override
-  _FaceScreenState createState() => _FaceScreenState();
+  FaceScreenState createState() => FaceScreenState();
 }
 
-class _FaceScreenState extends State<FaceScreen> {
+class FaceScreenState extends State<FaceScreen> {
   // 1. Initialize the Services
   final GeminiService _ai = GeminiService();
   final PixieVoiceService _voice = PixieVoiceService();
-  final FirebaseService _storage = FirebaseService();
   final FlutterTts _tts = FlutterTts();
 
   late CameraController _cameraController;
@@ -55,8 +56,8 @@ class _FaceScreenState extends State<FaceScreen> {
 
       // Step 4: Resume Listening
       _voice.startListening(handleWakeWord);
-    } catch (e) {
-      print("Robot Loop Error: $e");
+    } catch (e, stackTrace) {
+      dev.log("Robot Loop Error", error: e, stackTrace: stackTrace);
       _voice.startListening(handleWakeWord); // Restart if something fails
     }
   }
@@ -70,8 +71,9 @@ class _FaceScreenState extends State<FaceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_isInitialized)
+    if (!_isInitialized) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text("Pixie Robot Cam")),

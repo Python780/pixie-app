@@ -1,10 +1,22 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:pixie/firebase_options.dart';
 import 'package:pixie/screens/controller_screen.dart';
 
 void main() async {
+  // 1. This must be the first line
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+
+  try {
+    // 2. Initialize Firebase for the current platform
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint("Firebase init failed: $e");
+    // Even if it fails, we want to see the UI
+  }
+
   runApp(const MyApp());
 }
 
