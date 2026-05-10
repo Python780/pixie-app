@@ -1,4 +1,6 @@
 import 'package:speech_to_text/speech_to_text.dart';
+import 'dart:developer' as dev;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 typedef WakeWordCallback = void Function();
 
@@ -7,41 +9,54 @@ class PixieVoiceService {
   bool _isListening = false;
 
   Future<void> initializeSpeech() async {
-    // Standard 2026 check for microphone permissions and hardware availability
-    bool available = await _stt.initialize(
-      onError: (val) => print('STT Error: $val'),
-      onStatus: (val) => print('STT Status: $val'),
-    );
-    if (!available) {
-      throw StateError(
-        'Speech recognition hardware unavailable or permission denied',
+    // 1. Prevent Web Crash: SpeechToText often fails on web drivers
+    if (kIsWeb) {
+      dev.log("Speech-to-Text skipped: Web platform detected.");
+      return;
+    }
+
+    try {
+      bool available = await _stt.initialize(
+        onError: (val) => dev.log('STT Error: $val'),
+        onStatus: (val) => dev.log('STT Status: $val'),
       );
+
+      if (!available) {
+        dev.log('Speech recognition hardware unavailable');
+      }
+    } catch (e) {
+      // 2. Log error but don't rethrow, so the rest of the app can load
+      dev.log('Speech Init Failed: $e');
     }
   }
 
   Future<void> startListening(WakeWordCallback onWakeWord) async {
-    if (_isListening) return;
+    // 3. Prevent multiple listeners and check web safety again
+    if (_isListening || kIsWeb) return;
 
-    // We use the STT engine's built-in listener for the wake-word
-    // This is more power-efficient than processing raw frames manually
-    await _stt.listen(
-      onResult: (result) {
-        String words = result.recognizedWords.toLowerCase();
-        if (words.contains('hi pixie')) {
-          stopListening(); // Shut down the mic to free hardware for the camera
-          onWakeWord(); // Trigger Phase 3 (Camera)
-        }
-      },
-      listenMode:
-          ListenMode.deviceDefault, // Optimized for 2026 mobile hardware
-      cancelOnError: false,
-    );
+    try {
+      await _stt.listen(
+        onResult: (result) {
+          String words = result.recognizedWords.toLowerCase();
 
-    _isListening = true;
+          // 4. Wake-word logic
+          if (words.contains('hi pixie')) {
+            stopListening();
+            onWakeWord(); // Triggers the Gemini/Camera phase
+          }
+        },
+        listenMode: ListenMode.deviceDefault,
+        cancelOnError: false,
+      );
+      _isListening = true;
+    } catch (e) {
+      dev.log("Listening failed to start: $e");
+    }
   }
 
   Future<void> stopListening() async {
-    if (!_isListening) return;
+    if (!_isListening || kIsWeb) return;
+
     await _stt.stop();
     _isListening = false;
   }

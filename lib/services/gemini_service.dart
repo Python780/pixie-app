@@ -1,6 +1,7 @@
 import 'package:firebase_ai/firebase_ai.dart';
 import 'package:camera/camera.dart';
-import 'firebase_service.dart'; // Ensure this matches your filename
+import 'dart:developer' as dev; // For production-safe logging
+import 'firebase_service.dart';
 
 class GeminiService {
   // Initialize the 2026 Gemini 3 Flash model
@@ -14,6 +15,7 @@ class GeminiService {
     try {
       final imageBytes = await imageFile.readAsBytes();
 
+      // In this package, the parts are TextPart and DataPart
       final prompt = [
         Content.multi([
           TextPart(
@@ -23,17 +25,16 @@ class GeminiService {
         ]),
       ];
 
-      // Generate the AI response
       final response = await _model.generateContent(prompt);
       final responseText = response.text ?? "I see you! (happy)";
 
-      // AUTOMATIC MEMORY: Save to Firestore immediately
-      // This uses the 60-minute filter logic we built in the Firebase Service
+      // Save to Firebase (storage only, no AI logic here)
       await _dbService.saveInteraction(responseText);
 
       return responseText;
-    } catch (e) {
-      print("Gemini Brain Error: $e");
+    } catch (e, stackTrace) {
+      // Fixed the 'print' warning with a developer log
+      dev.log("Gemini Brain Error", error: e, stackTrace: stackTrace);
       return "I'm having a little trouble thinking right now. (neutral)";
     }
   }
