@@ -7,7 +7,7 @@ class GeminiService {
   // 1. Initialize with new API Key from AI Studio
   final _model = GenerativeModel(
     model: 'gemini-3-flash-preview', // Flash is fastest for robot interactions
-    apiKey: 'AQ.Ab8RN6KKFeKwpNCngBZ1VoBW2DsKuqwXJRamggs58SHQpWR9CQ',
+    apiKey: const String.fromEnvironment('GEMINI_API_KEY'),
   );
 
   final FirebaseService _dbService = FirebaseService();
