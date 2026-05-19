@@ -1,10 +1,11 @@
 import 'package:speech_to_text/speech_to_text.dart';
 import 'dart:developer' as dev;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show VoidCallback;
 
 typedef WakeWordCallback = void Function();
 
-class PixieVoiceService {
+class PixieVoiceTriggerService {
   final SpeechToText _stt = SpeechToText();
   bool _isListening = false;
 
@@ -30,19 +31,18 @@ class PixieVoiceService {
     }
   }
 
-  Future<void> startListening(WakeWordCallback onWakeWord) async {
-    // 3. Prevent multiple listeners and check web safety again
-    if (_isListening || kIsWeb) return;
+ /// Listen for wake word "hi pixie" to start conversation
+  Future<void> startWakeWordListening(VoidCallback onWakeWord) async {
+    if (_isListening) return;
 
     try {
       await _stt.listen(
         onResult: (result) {
           String words = result.recognizedWords.toLowerCase();
-
-          // 4. Wake-word logic
           if (words.contains('hi pixie')) {
             stopListening();
-            onWakeWord(); // Triggers the Gemini/Camera phase
+            dev.log("🎯 Wake word detected! Starting conversation...");
+            onWakeWord();
           }
         },
         listenMode: ListenMode.deviceDefault,
@@ -50,7 +50,7 @@ class PixieVoiceService {
       );
       _isListening = true;
     } catch (e) {
-      dev.log("Listening failed to start: $e");
+      dev.log("Wake word listening failed: $e");
     }
   }
 
@@ -61,3 +61,5 @@ class PixieVoiceService {
     _isListening = false;
   }
 }
+
+

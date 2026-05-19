@@ -1,9 +1,7 @@
-import 'package:camera/camera.dart';
+// lib/screens/face_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'dart:developer' as dev;
-import '../services/gemini_service.dart';
-import '../services/voice_trigger_service.dart';
+import '../providers/conversation_provider.dart';
+import '../widgets/robot_face/dashboard.dart'; // Import your custom robot face component
 
 class FaceScreen extends StatefulWidget {
   const FaceScreen({super.key});
@@ -13,78 +11,148 @@ class FaceScreen extends StatefulWidget {
 }
 
 class FaceScreenState extends State<FaceScreen> {
-  // 1. Initialize the Services
-  final GeminiService _ai = GeminiService();
-  final PixieVoiceService _voice = PixieVoiceService();
-  final FlutterTts _tts = FlutterTts();
-
-  late CameraController _cameraController;
-  bool _isInitialized = false;
+  final ConversationProvider _provider = ConversationProvider();
+  bool _isLoading = true;
+  List<Message> _chatMessages = [];
+  bool _isRobotTalkingOrProcessing = false;
 
   @override
   void initState() {
     super.initState();
-    _setupRobot();
+    _initPixieSystem();
   }
 
-  // Initial setup for the Eye (Camera) and Ear (Voice)
-  Future<void> _setupRobot() async {
-    // Initialize Camera
-    final cameras = await availableCameras();
-    _cameraController = CameraController(cameras[1], ResolutionPreset.medium);
-    await _cameraController.initialize();
+  Future<void> _initPixieSystem() async {
+    await _provider.initialize();
+    _provider.onMessagesUpdated = (messages) {
+      setState(() {
+        _chatMessages = List.from(messages);
+      });
+    };
 
-    // Initialize Voice Ear
-    await _voice.initializeSpeech();
-    _voice.startListening(handleWakeWord);
-
-    setState(() => _isInitialized = true);
-  }
-
-  // The Main Controller (Orchestration)
-  void handleWakeWord() async {
-    try {
-      // Step 1: Camera Snapshot (The Eye)
-      XFile img = await _cameraController.takePicture();
-
-      // Step 2: AI Brain & Database (The Brain)
-      // This single call now handles Gemini AND saving to Firestore
-      String result = await _ai.processWithGemini(img);
-
-      // Step 3: Speak (The Voice)
-      await _speak(result);
-
-      // Step 4: Resume Listening
-      _voice.startListening(handleWakeWord);
-    } catch (e, stackTrace) {
-      dev.log("Robot Loop Error", error: e, stackTrace: stackTrace);
-      _voice.startListening(handleWakeWord); // Restart if something fails
-    }
-  }
-
-  Future<void> _speak(String text) async {
-    // Clean text to remove the (emotion) tag before speaking
-    String cleanText = text.split('(').first.trim();
-    await _tts.setPitch(1.3);
-    await _tts.speak(cleanText);
+    _provider.onStatusChanged = (isProcessingOrActive) {
+      setState(() {
+        _isRobotTalkingOrProcessing = isProcessingOrActive;
+      });
+    };
+    _provider.startWakeWordDetection();
+    setState(() => _isLoading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_isInitialized) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.cyanAccent),
+        ),
+      );
     }
+    String currentEmotion = 'neutral'; //Default emotion if no messages yet
 
+    if (_chatMessages.isNotEmpty) {
+    // Find the most recent bot message with an emotion tag
+    final lastBotMsg = _chatMessages.lastWhere(
+      (m) => !m.isUser, 
+      orElse: () => _chatMessages.first
+    );
+    currentEmotion = lastBotMsg.emotion ?? 'neutral';
+    }
+    
+    final bool isCurrentlyTalking = _provider.isProcessing;
+    
     return Scaffold(
-      appBar: AppBar(title: const Text("Pixie Robot Cam")),
-      body: CameraPreview(_cameraController), // Show what Pixie sees
+      backgroundColor: const Color(0xFF222222),
+      appBar: AppBar(
+        title: const Text("Pixie Multimodal Face", style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.black,
+        actions: [
+          Icon(
+            _provider.isCameraActive ? Icons.videocam : Icons.videocam_off,
+            color: _provider.isCameraActive ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 15),
+        ],
+      ),
+      body: Column(
+        children: [
+          // ================= TOP BLOCK: ROBOT FACE PANEL LAYER =================
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: DashboardWidget(
+              emotion: currentEmotion,
+              isTalking: isCurrentlyTalking,
+              isProcessing: _isRobotTalkingOrProcessing,
+            ),
+          ),
+          // ================= BOTTOM BLOCK: ACTIVE CONVERSATION FEED =================
+          Expanded(
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
+              ),
+              child: _chatMessages.isEmpty
+                  ? Center(
+                      child: Text(
+                        _provider.isListeningForWakeWord ? "Say 'Hi Pixie' to wake me up!" : "Connecting sensors...",
+                        style: const TextStyle(color: Colors.grey, fontSize: 16),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _chatMessages.length,
+                      itemBuilder: (context, index) {
+                        final msg = _chatMessages[index];
+                        return _buildChatBubble(msg);
+                      },
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatBubble(Message msg) {
+    return Align(
+      alignment: msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: msg.isUser ? Colors.cyan[700] : Colors.grey[800],
+          borderRadius: BorderRadius.circular(20).copyWith(
+            bottomRight: msg.isUser ? const Radius.circular(0) : const Radius.circular(20),
+            topLeft: msg.isUser ? const Radius.circular(20) : const Radius.circular(0),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              msg.text,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
+            if (!msg.isUser && msg.facialAnalysis != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  "Analysis: ${msg.facialAnalysis}",
+                  style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, fontStyle: FontStyle.italic),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
   @override
   void dispose() {
-    _cameraController.dispose();
-    _voice.stopListening();
+    _provider.shutdown();
     super.dispose();
   }
 }

@@ -1,31 +1,35 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:pixie/firebase_options.dart';
-import 'package:pixie/screens/controller_screen.dart';
+//import 'package:pixie/screens/controller_screen.dart';
+import 'screens/face_screen.dart';
 //import 'firebase_options.dart';
 
 void main() async {
-  // 1. This must be the first line
+  // Ensure native device hardware channels (Camera/Mic) are fully ready before boot
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform,);
-  print("🔥 Firebase initialized successfully!");
-  runApp(const MyApp());
+  
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  runApp(const PixieRobotApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PixieRobotApp extends StatelessWidget {
+  const PixieRobotApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
+      title: 'Pixie AI Robot Controller',
+      debugShowCheckedModeBanner: false, // Clean look without the debug ribbon
       theme: ThemeData(
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.dark(primary: Colors.cyanAccent),
-        scaffoldBackgroundColor: Colors.black,
+        brightness: Brightness.dark, // Use dark mode across the platform for a tech aesthetic
+        scaffoldBackgroundColor: const Color(0xFF0F0F1A),
+        primarySwatch: Colors.cyan,
       ),
-      home: const ControllerScreen(),
+      home: const FaceScreen(),// Boot directly into your responsive core routing surface
     );
   }
-}
+} 
