@@ -4,17 +4,16 @@ import '../providers/conversation_provider.dart';
 import '../widgets/robot_face/dashboard.dart'; // Import your custom robot face component
 
 class FaceScreen extends StatefulWidget {
-  const FaceScreen({super.key});
+  final ConversationProvider provider;
+  const FaceScreen({super.key, required this.provider});
 
   @override
   FaceScreenState createState() => FaceScreenState();
 }
 
 class FaceScreenState extends State<FaceScreen> {
-  final ConversationProvider _provider = ConversationProvider();
   bool _isLoading = true;
   List<Message> _chatMessages = [];
-  bool _isRobotTalkingOrProcessing = false;
 
   @override
   void initState() {
@@ -23,20 +22,25 @@ class FaceScreenState extends State<FaceScreen> {
   }
 
   Future<void> _initPixieSystem() async {
-    await _provider.initialize();
-    _provider.onMessagesUpdated = (messages) {
+    await widget.provider.initialize();
+    
+    widget.provider.onMessagesUpdated = (messages) {
       setState(() {
         _chatMessages = List.from(messages);
       });
     };
+    
+    widget.provider.addListener(
+      _providerListener,
+    );
 
-    _provider.onStatusChanged = (isProcessingOrActive) {
-      setState(() {
-        _isRobotTalkingOrProcessing = isProcessingOrActive;
-      });
-    };
-    _provider.startWakeWordDetection();
+    widget.provider.startWakeWordDetection();
     setState(() => _isLoading = false);
+  }
+  
+  void _providerListener() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   @override
@@ -49,8 +53,8 @@ class FaceScreenState extends State<FaceScreen> {
         ),
       );
     }
+    
     String currentEmotion = 'neutral'; //Default emotion if no messages yet
-
     if (_chatMessages.isNotEmpty) {
     // Find the most recent bot message with an emotion tag
     final lastBotMsg = _chatMessages.lastWhere(
@@ -60,7 +64,7 @@ class FaceScreenState extends State<FaceScreen> {
     currentEmotion = lastBotMsg.emotion ?? 'neutral';
     }
     
-    final bool isCurrentlyTalking = _provider.isProcessing;
+    final bool isCurrentlyTalking = widget.provider.isSpeaking;
     
     return Scaffold(
       backgroundColor: const Color(0xFF222222),
@@ -69,8 +73,8 @@ class FaceScreenState extends State<FaceScreen> {
         backgroundColor: Colors.black,
         actions: [
           Icon(
-            _provider.isCameraActive ? Icons.videocam : Icons.videocam_off,
-            color: _provider.isCameraActive ? Colors.green : Colors.red,
+            widget.provider.isCameraActive ? Icons.videocam : Icons.videocam_off,
+            color: widget.provider.isCameraActive ? Colors.green : Colors.red,
           ),
           const SizedBox(width: 15),
         ],
@@ -83,7 +87,7 @@ class FaceScreenState extends State<FaceScreen> {
             child: DashboardWidget(
               emotion: currentEmotion,
               isTalking: isCurrentlyTalking,
-              isProcessing: _isRobotTalkingOrProcessing,
+              isProcessing: widget.provider.isProcessing,
             ),
           ),
           // ================= BOTTOM BLOCK: ACTIVE CONVERSATION FEED =================
@@ -96,7 +100,7 @@ class FaceScreenState extends State<FaceScreen> {
               child: _chatMessages.isEmpty
                   ? Center(
                       child: Text(
-                        _provider.isListeningForWakeWord ? "Say 'Hi Pixie' to wake me up!" : "Connecting sensors...",
+                       widget.provider.isListeningForWakeWord ? "Say 'Hi Pixie' to wake me up!" : "Connecting sensors...",
                         style: const TextStyle(color: Colors.grey, fontSize: 16),
                       ),
                     )
@@ -152,7 +156,10 @@ class FaceScreenState extends State<FaceScreen> {
 
   @override
   void dispose() {
-    _provider.shutdown();
+    widget.provider.removeListener(
+      _providerListener,
+    );
+    widget.provider.shutdown();
     super.dispose();
   }
 }

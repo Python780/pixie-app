@@ -1,41 +1,74 @@
 import 'package:camera/camera.dart';
 import 'dart:developer' as dev;
+import 'package:permission_handler/permission_handler.dart';
 
 class PixieCameraService {
   CameraController? _controller;
+  bool _initialized = false;
 
-  Future<void> triggerVision(Function(XFile) onImageCaptured) async {
+  bool get isInitialized => _initialized;
+
+  Future<void> initializeCamera() async {
+    if (_initialized) return;
+
     try {
-      // 1. Identify available hardware sensors
+      var status = await Permission.camera.status;
+
+      if (!status.isGranted) {
+        status = await Permission.camera.request();
+
+        if (!status.isGranted) {
+          dev.log('🚫 Camera permission denied');
+          return;
+        }
+      }
+
       final cameras = await availableCameras();
 
       if (cameras.isEmpty) {
-        dev.log('📷 No cameras available on this platform');
+        dev.log('📷 No camera available');
         return;
       }
-      
-      // 2. Select the front-facing camera (usually index 1, fallback to 0 for web/limited devices)
+
       final cameraIndex = cameras.length > 1 ? 1 : 0;
-      // Use Medium resolution to keep the file size small for the Free Tier API
+
       _controller = CameraController(
         cameras[cameraIndex],
         ResolutionPreset.medium,
-        enableAudio: false, // We don't need audio for the facial scan
+        enableAudio: false,
       );
 
-      // 3. Initialize the sensor
       await _controller!.initialize();
 
-      // 4. Capture the frame
-      XFile image = await _controller!.takePicture();
+      _initialized = true;
 
-      // 5. Handover the image to the Brain (Phase 4)
-      await onImageCaptured(image);
+      dev.log('✅ Camera initialized once');
     } catch (e) {
-      print("Camera Sensor Error: $e");
-    } finally {
-      // 6. Power down the sensor to save energy (Critical for ESG goals)
+      dev.log('Camera init error: $e');
+    }
+  }
+
+  Future<XFile?> captureFrame() async {
+    try {
+      if (!_initialized || _controller == null) {
+        dev.log('⚠️ Camera not initialized');
+        return null;
+      }
+
+      return await _controller!.takePicture();
+    } catch (e) {
+      dev.log('Capture error: $e');
+      return null;
+    }
+  }
+
+  Future<void> disposeCamera() async {
+    try {
       await _controller?.dispose();
+      _initialized = false;
+      dev.log('📷 Camera disposed');
+    } catch (e) {
+      dev.log('Dispose camera error: $e');
     }
   }
 }

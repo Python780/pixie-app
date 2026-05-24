@@ -2,12 +2,14 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:camera/camera.dart';
 import 'dart:developer' as dev;
 import 'firebase_service.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:convert';
 
 class GeminiService {
   // 1. Initialize with new API Key from AI Studio
   final _model = GenerativeModel(
-    model: 'gemini-3-flash-preview', // Flash is fastest for robot interactions
-    apiKey: const String.fromEnvironment('GEMINI_API_KEY'),
+    model: 'gemini-3-flash', // Flash is fastest for robot interactions
+    apiKey: dotenv.env['GEMINI_API_KEY'] ?? '', // Load from .env for security
   );
 
   final FirebaseService _dbService = FirebaseService();
@@ -69,9 +71,16 @@ Conversation context: ${conversationHistory ?? "(new conversation)"}
 User just said: "$userInput"
 ${imageFile != null ? "Camera image available for facial analysis." : "(No camera image)"}
 
-Format your response as:
-FACIAL_ANALYSIS: [description]
-RESPONSE: [your response with emotion in brackets]""";
+Return ONLY valid JSON.
+
+Format:
+{
+  "response": "your response",
+  "emotion": "happy",
+  "facial_analysis": "user appears happy",
+  "face_emotion": "happy",
+  "face_confidence": "high"
+}""";
 
       parts.add(TextPart(systemPrompt));
 
@@ -88,13 +97,26 @@ RESPONSE: [your response with emotion in brackets]""";
       // Generate response
       final content = [Content.multi(parts)];
       final response = await _model.generateContent(content);
-      final fullText =
-          response.text ??
-          "FACIAL_ANALYSIS: Unable to analyze\nRESPONSE: I'm having trouble thinking. (confused)";
+      final fullText = response.text ?? "{}";
 
       // Parse response into facial analysis and conversation response
-      final facialAnalysis = _extractSection(fullText, "FACIAL_ANALYSIS");
-      final conversationResponse = _extractSection(fullText, "RESPONSE");
+      Map<String, dynamic> data = {};
+      try {
+          data = jsonDecode(fullText);
+      } catch (e) {
+        dev.log("JSON parse error: $e");
+      }
+
+      final facialAnalysis =
+            data['facial_analysis'] ?? 'Unable to analyze';
+      final conversationResponse =
+            data['response'] ?? 'I am confused (neutral)';
+      final faceEmotion =
+            data['face_emotion'] ?? 'neutral';
+      final faceConfidence =
+            data['face_confidence'] ?? 'low';
+      final emotion =
+            data['emotion'] ?? 'neutral';
 
       // Save interaction
       try {
@@ -106,10 +128,11 @@ RESPONSE: [your response with emotion in brackets]""";
       }
 
       return {
-        'response': conversationResponse.isEmpty
-            ? "That's interesting! (thoughtful)"
-            : conversationResponse,
-        'facial': facialAnalysis.isEmpty ? "Unable to analyze" : facialAnalysis,
+        'response': conversationResponse,
+        'facial': facialAnalysis,
+        'faceEmotion': faceEmotion,
+        'faceConfidence': faceConfidence,
+        'emotion': emotion,
       };
     } catch (e) {
       dev.log("Gemini Conversation Error: $e");
@@ -120,25 +143,5 @@ RESPONSE: [your response with emotion in brackets]""";
     }
   }
 
-  /// Helper to extract sections from response
-  String _extractSection(String text, String sectionName) {
-    try {
-      final pattern = RegExp(
-        '$sectionName:\\s*(.+?)(?=(?:FACIAL_ANALYSIS|RESPONSE)|\\z)',
-        multiLine: true,
-      );
-      final match = pattern.firstMatch(text);
-      if (match != null) {
-        return match.group(1)?.trim() ?? "";
-      }
-      // Fallback: if no section markers, treat entire text as response
-      if (sectionName == "RESPONSE") {
-        return text.trim();
-      }
-      return "";
-    } catch (e) {
-      dev.log("Error extracting section $sectionName: $e");
-      return "";
-    }
-  }
+  /// Helper to extract sections from response  
 }

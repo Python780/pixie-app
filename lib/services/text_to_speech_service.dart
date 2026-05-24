@@ -60,7 +60,7 @@ class PixieTextToSpeechService {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     int attempts = 0;
-    while (_isSpeaking && attempts < timeout.inSeconds) {
+    while (_isSpeaking && attempts < (timeout.inMilliseconds ~/ 100)) {
       await Future.delayed(const Duration(milliseconds: 100));
       attempts++;
     }

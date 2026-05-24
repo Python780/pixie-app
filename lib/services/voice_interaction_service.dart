@@ -1,83 +1,87 @@
-import 'package:speech_to_text/speech_to_text.dart';
 import 'dart:developer' as dev;
-//import 'package:flutter/foundation.dart' show VoidCallback;
+import 'package:speech_to_text/speech_to_text.dart';
+import 'base_voice_service.dart';
 
-//typedef ConversationCallback = Future<void> Function(String userInput);
+class PixieVoiceInteractionService
+    extends BaseVoiceService {
 
-class PixieVoiceInteractionService {
-  final SpeechToText _stt = SpeechToText();
-  bool _isListening = false;
-  bool _inConversation = false;
   String _currentInput = "";
 
-  Future<void> initializeSpeech() async {
-    try {
-      bool available = await _stt.initialize(
-        onError: (val) => dev.log('STT Error: $val'),
-        onStatus: (val) => dev.log('STT Status: $val'),
-      );
+  Future<String> listenForInput({
+    int maxDurationSeconds = 10,
+  }) async {
 
-      if (!available) {
-        dev.log('Speech recognition hardware unavailable');
-      }
-    } catch (e) {
-      dev.log('Speech Init Failed: $e');
+    if (isListening) return "";
+    bool available = await initSpeech();
+
+    if (!available) {
+      return "";
     }
-  }
-
- 
-  /// Listen only for user input during active conversation
-  Future<String> listenForInput({int maxDurationSeconds = 10}) async {
-    if (_isListening || !_inConversation) return "";
 
     _currentInput = "";
 
     try {
-      await _stt.listen(
-        onResult: (result) {
+
+      await Future.delayed(
+        const Duration(milliseconds: 500),
+      );
+
+      isListening = true;
+      dev.log("🎤 Conversation listening START");
+
+      await stt.listen(
+
+        onResult: (result) async {
           _currentInput = result.recognizedWords;
           dev.log(
-            "🎤 User said: $_currentInput (isFinal: ${result.finalResult})",
+            "🎤 User said: $_currentInput",
           );
-        },
-        listenMode: ListenMode.deviceDefault,
-        cancelOnError: false,
-        pauseFor: Duration(
-          seconds: 3,
-        ), // Stop listening after 3 seconds of silence
-      );
-      _isListening = true;
 
-      // Wait for the timeout or until listening stops
-      await Future.delayed(Duration(seconds: maxDurationSeconds));
-      await stopListening();
+          // User finished speaking
+          if (result.finalResult) {
+            dev.log("✅ Final result received");
+            await stopListening();
+          }
+        },
+
+        listenMode: ListenMode.dictation,
+        partialResults: true,
+        cancelOnError: false,
+        pauseFor: const Duration(seconds: 3),
+        listenFor: Duration(
+          seconds: maxDurationSeconds,
+        ),
+      );
+
+      // Wait until listening ends
+      int safetyCounter = 0;
+
+      while (isListening) {
+        await Future.delayed(
+          const Duration(milliseconds: 200),
+        );
+
+        safetyCounter++;
+
+        if (safetyCounter > 75) {
+          dev.log("⚠️ Force stop listener");
+          await stopListening();
+          break;
+        }
+      }
 
       return _currentInput;
+
     } catch (e) {
       dev.log("Conversation listening failed: $e");
+      isListening = false;
       return "";
     }
   }
 
-  /// Process a round of conversation (listen → wait for response)
-  Future<String> conversationRound({int maxDurationSeconds = 10}) async {
-    if (!_inConversation) return "";
-    return await listenForInput(maxDurationSeconds: maxDurationSeconds);
-  }
-
-  Future<void> stopListening() async {
-    if (!_isListening) return;
-    await _stt.stop();
-    _isListening = false;
-  }
-
   void endConversation() {
-    _inConversation = false;
     _currentInput = "";
     stopListening();
     dev.log("👋 Conversation ended");
   }
-
-  bool get isInConversation => _inConversation;
-  bool get isListening => _isListening;
 }

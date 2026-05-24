@@ -1,65 +1,62 @@
-import 'package:speech_to_text/speech_to_text.dart';
 import 'dart:developer' as dev;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/foundation.dart' show VoidCallback;
+import 'package:speech_to_text/speech_to_text.dart';
+import 'base_voice_service.dart';
 
-typedef WakeWordCallback = void Function();
+class PixieVoiceTriggerService extends BaseVoiceService {
 
-class PixieVoiceTriggerService {
-  final SpeechToText _stt = SpeechToText();
-  bool _isListening = false;
+  Future<void> startWakeWordListening(
+    VoidCallback onWakeWord,
+  ) async {
 
-  Future<void> initializeSpeech() async {
-    // 1. Prevent Web Crash: SpeechToText often fails on web drivers
-    if (kIsWeb) {
-      dev.log("Speech-to-Text skipped: Web platform detected.");
+    if (isListening) return;
+
+    bool available = await initSpeech();
+
+    if (!available) {
+      dev.log("STT unavailable");
       return;
     }
 
     try {
-      bool available = await _stt.initialize(
-        onError: (val) => dev.log('STT Error: $val'),
-        onStatus: (val) => dev.log('STT Status: $val'),
-      );
+      isListening = true;
 
-      if (!available) {
-        dev.log('Speech recognition hardware unavailable');
-      }
-    } catch (e) {
-      // 2. Log error but don't rethrow, so the rest of the app can load
-      dev.log('Speech Init Failed: $e');
-    }
-  }
+      dev.log("👂 Wake word listening started");
 
- /// Listen for wake word "hi pixie" to start conversation
-  Future<void> startWakeWordListening(VoidCallback onWakeWord) async {
-    if (_isListening) return;
+      await stt.listen(
+        onResult: (result) async {
 
-    try {
-      await _stt.listen(
-        onResult: (result) {
-          String words = result.recognizedWords.toLowerCase();
+          String words =
+              result.recognizedWords.toLowerCase();
+
+          dev.log("🎤 Heard: $words");
+
           if (words.contains('hi pixie')) {
-            stopListening();
-            dev.log("🎯 Wake word detected! Starting conversation...");
+
+            dev.log("🎯 Wake word detected!");
+
+            await stopListening();
+
+            await Future.delayed(
+              const Duration(milliseconds: 500),
+            );
+
             onWakeWord();
           }
         },
-        listenMode: ListenMode.deviceDefault,
+
+        listenMode: ListenMode.dictation,
+        partialResults: true,
         cancelOnError: false,
+        pauseFor: const Duration(seconds: 5),
+        listenFor: const Duration(minutes: 5),
       );
-      _isListening = true;
+
     } catch (e) {
+
       dev.log("Wake word listening failed: $e");
+
+      isListening = false;
     }
   }
-
-  Future<void> stopListening() async {
-    if (!_isListening || kIsWeb) return;
-
-    await _stt.stop();
-    _isListening = false;
-  }
 }
-
-
