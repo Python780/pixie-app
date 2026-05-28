@@ -3,35 +3,84 @@ import 'package:camera/camera.dart';
 import 'dart:developer' as dev;
 import 'firebase_service.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 class GeminiService {
-  late GenerativeModel _model;
+  GenerativeModel? _model;
   final FirebaseService _dbService = FirebaseService();
-  late final String _preferredModel;
-  late final String _fallbackModel;
+  String _preferredModel = 'gemini-2.5-flash';
+  String _fallbackModel = 'gemini-2.5-pro';
+  static const String _apiKeyPrefKey = 'gemini_api_key';
 
   /// Must initialize the device user before saving interactions.
   Future<void> initialize() async {
-    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
-    if (apiKey.isEmpty) {
-      dev.log('Gemini API key not configured. Set GEMINI_API_KEY in .env');
-    }
-    // Use a supported Gemini model for the current v1beta API.
-    // If the preferred model is unavailable, fall back to another compatible
-    // Gemini model instead of the deprecated chat-bison model.
     _preferredModel = dotenv.env['GEMINI_MODEL'] ?? 'gemini-2.5-flash';
     _fallbackModel = dotenv.env['GEMINI_FALLBACK_MODEL'] ?? 'gemini-2.5-pro';
-    _model = GenerativeModel(model: _preferredModel, apiKey: apiKey);
-    await _dbService.initializeDeviceUser();
+
+    final apiKey = await _resolveApiKey();
+    if (apiKey.isEmpty) {
+      dev.log(
+        'Gemini API key not configured. Set GEMINI_API_KEY in .env or enter one in the app.',
+      );
+    } else {
+      _model = GenerativeModel(model: _preferredModel, apiKey: apiKey);
+    }
+
+    try {
+      await _dbService.initializeDeviceUser();
+    } catch (e, st) {
+      dev.log('Firebase initializeDeviceUser failed: $e\n$st');
+      // Firestore permissions may be restricted for this API key/project.
+      // Do not throw here — allow local API key storage to succeed even
+      // if remote telemetry cannot be written.
+    }
+  }
+
+  Future<String> getStoredApiKey() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_apiKeyPrefKey) ?? '';
+  }
+
+  Future<void> saveStoredApiKey(String apiKey) async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_apiKeyPrefKey, apiKey.trim());
+      final resolvedKey = apiKey.trim();
+      if (resolvedKey.isNotEmpty) {
+        _model = GenerativeModel(model: _preferredModel, apiKey: resolvedKey);
+      }
+      dev.log('Gemini API key saved successfully');
+    } catch (e) {
+      dev.log('Error saving Gemini API key: $e');
+      rethrow;
+    }
+  }
+
+  Future<String> _resolveApiKey() async {
+    final storedKey = await getStoredApiKey();
+    return storedKey.isNotEmpty
+        ? storedKey
+        : (dotenv.env['GEMINI_API_KEY'] ?? '');
+  }
+
+  Future<bool> _ensureModelReady() async {
+    final apiKey = await _resolveApiKey();
+    if (apiKey.isEmpty) {
+      return false;
+    }
+    _model ??= GenerativeModel(model: _preferredModel, apiKey: apiKey);
+    return true;
   }
 
   /// Original method: Analyze facial expression from image
   Future<String> processWithGemini(XFile imageFile) async {
-    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
-    if (apiKey.isEmpty) {
-      dev.log('Gemini API key not configured. Set GEMINI_API_KEY in .env');
-      return 'Gemini API key not configured. Please set GEMINI_API_KEY in .env';
+    final ready = await _ensureModelReady();
+    if (!ready) {
+      dev.log(
+        'Gemini API key not configured. Set GEMINI_API_KEY in .env or enter one in the app.',
+      );
+      return 'Gemini API key not configured. Please enter your Gemini API key in the settings.';
     }
     try {
       final imageBytes = await imageFile.readAsBytes();
@@ -52,7 +101,7 @@ class GeminiService {
       // 3. Generate content; on certain model errors, retry with fallback
       dynamic response;
       try {
-        response = await _model.generateContent(content);
+        response = await _model!.generateContent(content);
       } catch (e) {
         dev.log('GenerateContent failed with preferred model: $e');
         // If it's a model-not-found or unsupported-model error, switch to
@@ -65,12 +114,12 @@ class GeminiService {
             err.contains('generatecontent')) {
           dev.log('Switching to fallback model $_fallbackModel and retrying');
           try {
-            final apiKey2 = dotenv.env['GEMINI_API_KEY'] ?? '';
+            final apiKey2 = await _resolveApiKey();
             _model = GenerativeModel(model: _fallbackModel, apiKey: apiKey2);
-            response = await _model.generateContent(content);
+            response = await _model!.generateContent(content);
           } catch (e2) {
             dev.log('Fallback generateContent also failed: $e2');
-            throw e2;
+            rethrow;
           }
         } else {
           rethrow;
@@ -100,12 +149,14 @@ class GeminiService {
     XFile? imageFile,
     String? conversationHistory,
   }) async {
-    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
-    if (apiKey.isEmpty) {
-      dev.log('Gemini API key not configured. Set GEMINI_API_KEY in .env');
+    final ready = await _ensureModelReady();
+    if (!ready) {
+      dev.log(
+        'Gemini API key not configured. Set GEMINI_API_KEY in .env or enter one in the app.',
+      );
       return {
         'response':
-            'Gemini API key not configured. Please set GEMINI_API_KEY in .env',
+            'Gemini API key not configured. Please enter your Gemini API key in the app settings.',
         'facial': 'No analysis',
         'faceEmotion': 'neutral',
         'faceConfidence': 'low',
@@ -121,9 +172,11 @@ class GeminiService {
       final systemPrompt =
           """You are Pixie, a friendly and helpful robot assistant.
 
-Give the user a normal conversational reply first. Do not wrap the reply in JSON.
-If you need to include metadata, put it after the reply in a separate JSON object,
-but always start with the plain answer on the first line.
+Answer the user with a complete, conversational reply. Avoid short status messages like "Getting weather info...".
+If the user asks for weather but doesn't specify a location, politely ask them where they'd like to know the weather for.
+If the user asks for weather with a location, provide current conditions, temperature, and a short recommendation or next step for that location.
+If the user asks a question, respond with at least two sentences unless the request is explicitly for a short answer.
+Do not wrap the main reply in JSON. If you need to include metadata, put it after the reply in a separate JSON object, but always start with the plain answer first.
 
 If there are multiple people in the image, analyze every detected face. Label the nearest person as Person 1, the next nearest as Person 2, and so on.
 Return a summary of each detected person as well as the overall conversational reply.
@@ -132,10 +185,10 @@ Conversation context: ${conversationHistory ?? "(new conversation)"}
 User just said: "$userInput"
 ${imageFile != null ? "Camera image available for facial analysis." : "(No camera image)"}
 
-Example output:
-I'm happy to help! (happy)
+Example output for weather query with location:
+The weather in Toronto is currently 15°C and partly cloudy with a chance of rain later today. I'd recommend bringing a light jacket and an umbrella if you're heading out. (helpful)
 
-{"response": "I'm happy to help! (happy)", "emotion": "happy", "facial_analysis": "Person 1 appears calm, Person 2 appears curious.", "face_emotion": "calm", "face_confidence": "medium", "faces": [{"person": "Person 1", "emotion": "calm", "confidence": "medium"}, {"person": "Person 2", "emotion": "curious", "confidence": "low"}]}
+{"response": "The weather in Toronto is currently 15°C and partly cloudy with a chance of rain later today. I'd recommend bringing a light jacket and an umbrella if you're heading out. (helpful)", "emotion": "helpful", "facial_analysis": "Person 1 appears interested.", "face_emotion": "interested", "face_confidence": "medium"}
 """;
 
       parts.add(TextPart(systemPrompt));
@@ -155,7 +208,7 @@ I'm happy to help! (happy)
       dynamic response;
       String fullText;
       try {
-        response = await _model.generateContent(content);
+        response = await _model!.generateContent(content);
         fullText = response.text ?? "{}";
       } catch (e) {
         dev.log('GenerateContent failed with preferred model: $e');
@@ -167,13 +220,13 @@ I'm happy to help! (happy)
             err.contains('generatecontent')) {
           dev.log('Switching to fallback model $_fallbackModel and retrying');
           try {
-            final apiKey2 = dotenv.env['GEMINI_API_KEY'] ?? '';
+            final apiKey2 = await _resolveApiKey();
             _model = GenerativeModel(model: _fallbackModel, apiKey: apiKey2);
-            response = await _model.generateContent(content);
+            response = await _model!.generateContent(content);
             fullText = response.text ?? "{}";
           } catch (e2) {
             dev.log('Fallback generateContent also failed: $e2');
-            throw e2;
+            rethrow;
           }
         } else {
           rethrow;
@@ -279,7 +332,16 @@ I'm happy to help! (happy)
 
     // If the text begins with a natural response and then JSON metadata,
     // take the first line or first sentence.
-    final lines = fullText.trim().split(RegExp(r'\r?\n'));
+    final trimmed = fullText.trim();
+    final start = trimmed.indexOf('{');
+    if (start > 0) {
+      final beforeJson = trimmed.substring(0, start).trim();
+      if (beforeJson.isNotEmpty) {
+        return beforeJson;
+      }
+    }
+
+    final lines = trimmed.split(RegExp(r'\r?\n'));
     if (lines.isNotEmpty) {
       final firstLine = lines.first.trim();
       if (firstLine.isNotEmpty && !firstLine.startsWith('{')) {

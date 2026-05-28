@@ -12,6 +12,7 @@ import '../services/gemini_service.dart';
 import '../services/camera_service.dart';
 import '../services/pixie_speech_service.dart';
 import '../services/firebase_service.dart';
+import '../services/analytics_service.dart';
 
 enum PixieState {
   idle,
@@ -46,9 +47,18 @@ class ConversationProvider with ChangeNotifier {
   final PixieTextToSpeechService _ttsService = PixieTextToSpeechService();
   final GeminiService _geminiService = GeminiService();
   final PixieCameraService _cameraService = PixieCameraService();
+  final AnalyticsService _analyticsService = AnalyticsService();
 
   final FirebaseService _dbService = FirebaseService();
   StreamSubscription? _interactionsSub;
+
+  double _currentListeningLevel = 0.0;
+  String? _listeningPrompt;
+  String _geminiApiKey = '';
+
+  ConversationProvider() {
+    _voiceService.onSoundLevelChange = _updateListeningLevel;
+  }
 
   PixieState _state = PixieState.idle;
 
@@ -76,6 +86,16 @@ class ConversationProvider with ChangeNotifier {
   // Callbacks for UI updates
   void Function(List<Message>)? onMessagesUpdated;
   void Function(bool)? onStatusChanged;
+
+  void _updateListeningLevel(double level) {
+    _currentListeningLevel = level;
+    notifyListeners();
+  }
+
+  void _updateListeningPrompt(String? message) {
+    _listeningPrompt = message;
+    notifyListeners();
+  }
 
   Future<void> initialize() async {
     try {
@@ -139,6 +159,7 @@ class ConversationProvider with ChangeNotifier {
         dev.log('Failed to subscribe to interactions: $e');
       }
 
+      await _loadGeminiApiKey();
       dev.log("✅ Pixie ready!");
       dev.log("🎤 Microphone always ON - waiting for 'Hi Pixie'...");
     } catch (e) {
@@ -161,16 +182,27 @@ class ConversationProvider with ChangeNotifier {
     if (!_listeningForWakeWord) return;
 
     dev.log("👂 Microphone active - listening for 'Hi Pixie'...");
-    _triggerService.startWakeWordListening(() async {
-      if (_isActive) return;
-      await _startConversation();
-      // Restart wake word safely after conversation ends
-      if (_listeningForWakeWord) {
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _listenForWakeWordLoop();
+    _triggerService
+        .startWakeWordListening(() async {
+          if (_isActive) return;
+          await _startConversation();
+          // Restart wake word safely after conversation ends
+          if (_listeningForWakeWord) {
+            Future.delayed(const Duration(milliseconds: 500), () {
+              _listenForWakeWordLoop();
+            });
+          }
+        })
+        .whenComplete(() {
+          if (_listeningForWakeWord && !_isActive) {
+            dev.log(
+              "🔁 Wake word listener stopped unexpectedly; restarting...",
+            );
+            Future.delayed(const Duration(milliseconds: 500), () {
+              _listenForWakeWordLoop();
+            });
+          }
         });
-      }
-    });
   }
 
   /// Private: Initialize a new conversation with camera ON
@@ -217,26 +249,26 @@ class ConversationProvider with ChangeNotifier {
       }
 
       // Listen for user input
+      _setState(PixieState.userListening);
+      _updateListeningPrompt("Listening for your response...");
       dev.log(
         "🎤 Waiting for user input${_cameraActive ? ' (📹 camera on)' : ' (📹 camera off)'}...",
       );
-      String userInput = await _voiceService.listenForInput().timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => "",
+      String userInput = await _voiceService.listenForInput(
+        maxDurationSeconds: 15,
       );
 
       if (userInput.isEmpty) {
+        _updateListeningPrompt("No speech detected. Listening again...");
         dev.log("⚠️ No speech recognized on first attempt; retrying once...");
-        userInput = await _voiceService.listenForInput().timeout(
-          const Duration(seconds: 15),
-          onTimeout: () => "",
-        );
+        userInput = await _voiceService.listenForInput(maxDurationSeconds: 15);
       }
 
       if (userInput.isEmpty) {
         continue;
       }
 
+      _updateListeningPrompt(null);
       _lastInteractionTime = DateTime.now();
 
       // Add user message
@@ -282,6 +314,13 @@ class ConversationProvider with ChangeNotifier {
       final faceConfidence = responseMap['faceConfidence'] ?? "low";
       final bool geminiAvailable = responseMap['geminiAvailable'] != false;
       final String? geminiError = responseMap['error']?.toString();
+
+      // Log analytics locally for every query.
+      await _analyticsService.logInteraction(
+        userQuery: userInput,
+        pixieResponse: response,
+        emotion: responseMap['emotion']?.toString() ?? 'neutral',
+      );
 
       // Only update availability when the Gemini service explicitly returned
       // a `geminiAvailable` flag. This keeps the 'unavailable' banner visible
@@ -386,6 +425,30 @@ class ConversationProvider with ChangeNotifier {
         .join('\n');
   }
 
+  Future<void> _loadGeminiApiKey() async {
+    _geminiApiKey = await _geminiService.getStoredApiKey();
+    notifyListeners();
+  }
+
+  Future<void> updateGeminiApiKey(String apiKey) async {
+    try {
+      await _geminiService.saveStoredApiKey(apiKey);
+      _geminiApiKey = apiKey.trim();
+      if (apiKey.isNotEmpty) {
+        _geminiAvailable = true;
+        _geminiErrorMessage = null;
+      }
+      await _geminiService.initialize();
+      notifyListeners();
+    } catch (e) {
+      dev.log('Error updating Gemini API key: $e');
+      _geminiErrorMessage = 'Failed to save API key: $e';
+      _geminiAvailable = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   /// End the conversation gracefully (camera off, microphone keeps listening)
   Future<void> endConversation() async {
     if (!_isActive) return;
@@ -393,6 +456,7 @@ class ConversationProvider with ChangeNotifier {
     _isActive = false;
     _cameraActive = false;
     _isSpeaking = false;
+    _updateListeningPrompt(null);
     await _ttsService.stop();
     await _cameraService.disposeCamera();
 
@@ -408,6 +472,7 @@ class ConversationProvider with ChangeNotifier {
     _isActive = false;
     _cameraActive = false;
     _isSpeaking = false;
+    _updateListeningPrompt(null);
     try {
       if (_interactionsSub != null) {
         await _interactionsSub!.cancel();
@@ -438,6 +503,10 @@ class ConversationProvider with ChangeNotifier {
   bool get isListeningForWakeWord => _listeningForWakeWord;
   bool get isGeminiAvailable => _geminiAvailable;
   String? get geminiErrorMessage => _geminiErrorMessage;
+  String get geminiApiKey => _geminiApiKey;
+  bool get hasSavedGeminiApiKey => _geminiApiKey.isNotEmpty;
+  double get listeningLevel => _currentListeningLevel;
+  String? get listeningPrompt => _listeningPrompt;
   int get inactivityTimeoutSeconds => _inactivityTimeoutSeconds;
 
   set inactivityTimeoutSeconds(int seconds) {

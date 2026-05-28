@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as dev;
 import 'dart:math' as math;
 import 'package:speech_to_text/speech_to_text.dart';
@@ -8,22 +9,56 @@ class PixieVoiceInteractionService extends BaseVoiceService {
   double _maxSoundLevel = 0.0;
   double _currentSoundLevel = 0.0;
   static const double _minSpeechLevel = 4.0;
+  static const double _maxDisplaySoundLevel = 8.0;
+
+  void Function(double)? onSoundLevelChange;
+
+  double get currentSoundLevel => _currentSoundLevel;
+  double get normalizedSoundLevel =>
+      (_currentSoundLevel / _maxDisplaySoundLevel).clamp(0.0, 1.0);
+
+  @override
+  Future<void> stopListening() async {
+    if (!isListening) {
+      _currentSoundLevel = 0.0;
+      onSoundLevelChange?.call(normalizedSoundLevel);
+      return;
+    }
+
+    await super.stopListening();
+    _currentSoundLevel = 0.0;
+    onSoundLevelChange?.call(normalizedSoundLevel);
+  }
 
   Future<String> listenForInput({int maxDurationSeconds = 10}) async {
-    if (isListening) return "";
-    bool available = await initSpeech();
+    if (isListening) {
+      await stopListening();
+      return "";
+    }
 
+    bool available = await initSpeech();
     if (!available) {
       return "";
     }
 
     _currentInput = "";
+    _currentSoundLevel = 0.0;
+    _maxSoundLevel = 0.0;
+    onSoundLevelChange?.call(normalizedSoundLevel);
 
+    Timer? timeoutTimer;
     try {
       await Future.delayed(const Duration(milliseconds: 500));
 
       isListening = true;
       dev.log("🎤 Conversation listening START");
+
+      timeoutTimer = Timer(Duration(seconds: maxDurationSeconds), () {
+        if (isListening) {
+          dev.log("⏱️ Listening timeout reached; stopping listener");
+          stopListening();
+        }
+      });
 
       await stt.listen(
         onResult: (result) async {
@@ -52,6 +87,7 @@ class PixieVoiceInteractionService extends BaseVoiceService {
         onSoundLevelChange: (level) {
           _currentSoundLevel = level;
           _maxSoundLevel = math.max(_maxSoundLevel, level);
+          onSoundLevelChange?.call(normalizedSoundLevel);
         },
         listenMode: ListenMode.dictation,
         partialResults: true,
@@ -60,12 +96,9 @@ class PixieVoiceInteractionService extends BaseVoiceService {
         listenFor: Duration(seconds: maxDurationSeconds),
       );
 
-      // Wait until listening ends
       int safetyCounter = 0;
-
       while (isListening) {
         await Future.delayed(const Duration(milliseconds: 200));
-
         safetyCounter++;
 
         if (safetyCounter > 75) {
@@ -80,6 +113,8 @@ class PixieVoiceInteractionService extends BaseVoiceService {
       dev.log("Conversation listening failed: $e");
       isListening = false;
       return "";
+    } finally {
+      timeoutTimer?.cancel();
     }
   }
 
