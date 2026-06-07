@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/robot_provider.dart';
+import '../providers/conversation_provider.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -56,7 +57,7 @@ class SettingsScreen extends StatelessWidget {
 
               subtitle: robot.isConnected
                   ? "Robot ready"
-                  : (robot.isScanningNotifier.value ? "Scanning..." : "Tap to connect ESP32"),
+                  : (robot.isScanning ? "Scanning..." : "Tap to connect ESP32"),
 
               onTap: () async {
 
