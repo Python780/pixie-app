@@ -38,7 +38,7 @@ class PixieVoiceTriggerService extends BaseVoiceService {
           // - or reasonable confidence from recognizer.
           final bool trusted =
               result.finalResult ||
-              (confidence != null && confidence > 0.45) ||
+              (confidence > 0.45) ||
               _currentSoundLevel >= _wakeWordMinLevel;
 
           if (words.contains('hi pixie') && trusted) {

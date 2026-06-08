@@ -1,7 +1,61 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:provider/provider.dart';
+import '../providers/sensor_provider.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  String? _lastError;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // Listen for errors from SensorProvider
+    final sensorProvider = context.watch<SensorProvider>();
+
+    if (sensorProvider.errorMessage != null &&
+        sensorProvider.errorMessage != _lastError) {
+      _lastError = sensorProvider.errorMessage;
+
+      // Defer SnackBar to post-frame callback to avoid build-phase errors
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      sensorProvider.errorMessage!,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.red.shade700,
+              duration: const Duration(seconds: 5),
+              action: SnackBarAction(
+                label: 'RETRY',
+                textColor: Colors.cyanAccent,
+                onPressed: () {
+                  sensorProvider.fetchLatestData();
+                },
+              ),
+            ),
+          );
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,6 +73,35 @@ class DashboardScreen extends StatelessWidget {
             fontWeight: FontWeight.w600,
           ),
         ),
+        actions: [
+          // Refresh button
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Consumer<SensorProvider>(
+              builder: (context, sensorProvider, _) {
+                return Center(
+                  child: GestureDetector(
+                    onTap: () {
+                      sensorProvider.fetchLatestData();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.cyanAccent.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        sensorProvider.isLoading ? Icons.sync : Icons.refresh,
+                        color: Colors.cyanAccent,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
 
       body: SingleChildScrollView(
@@ -27,6 +110,51 @@ class DashboardScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Error banner
+            Consumer<SensorProvider>(
+              builder: (context, sensorProvider, _) {
+                if (sensorProvider.errorMessage != null &&
+                    sensorProvider.errorMessage!.isNotEmpty) {
+                  return Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade900.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Colors.red.shade700,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.warning,
+                              color: Colors.red.shade400,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                sensorProvider.errorMessage!,
+                                style: TextStyle(
+                                  color: Colors.red.shade300,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+
             const Text(
               "ENVIRONMENTAL SENSORS",
               style: TextStyle(
@@ -37,29 +165,35 @@ class DashboardScreen extends StatelessWidget {
             ),
 
             const SizedBox(height: 16),
-            Row(
-              children: const [
-                Expanded(
-                  child: SensorCard(
-                    title: "TEMPERATURE",
-                    value: "26.5",
-                    unit: "°C",
-                    icon: Icons.thermostat,
-                    glowColor: Colors.orange,
-                  ),
-                ),
+            Consumer<SensorProvider>(
+              builder: (context, sensorProvider, _) {
+                return Row(
+                  children: [
+                    Expanded(
+                      child: SensorCard(
+                        title: "TEMPERATURE",
+                        value: sensorProvider.temperatureDisplay,
+                        unit: "°C",
+                        icon: Icons.thermostat,
+                        glowColor: Colors.orange,
+                        isLoading: sensorProvider.isLoading,
+                      ),
+                    ),
 
-                SizedBox(width: 16),
-                Expanded(
-                  child: SensorCard(
-                    title: "HUMIDITY",
-                    value: "65",
-                    unit: "%",
-                    icon: Icons.water_drop,
-                    glowColor: Colors.cyanAccent,
-                  ),
-                ),
-              ],
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: SensorCard(
+                        title: "HUMIDITY",
+                        value: sensorProvider.humidityDisplay,
+                        unit: "%",
+                        icon: Icons.water_drop,
+                        glowColor: Colors.cyanAccent,
+                        isLoading: sensorProvider.isLoading,
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
 
             const SizedBox(height: 32),
@@ -73,7 +207,15 @@ class DashboardScreen extends StatelessWidget {
             ),
 
             const SizedBox(height: 16),
-            const TelemetryCard(),
+            Consumer<SensorProvider>(
+              builder: (context, sensorProvider, _) {
+                return TelemetryCard(
+                  lastUpdate: sensorProvider.getTimeSinceUpdate(),
+                  radarValue: sensorProvider.radarDisplay,
+                  isDataFresh: sensorProvider.isDataFresh(),
+                );
+              },
+            ),
             const SizedBox(height: 30),
           ],
         ),
@@ -88,6 +230,7 @@ class SensorCard extends StatelessWidget {
   final String unit;
   final IconData icon;
   final Color glowColor;
+  final bool isLoading;
 
   const SensorCard({
     super.key,
@@ -96,6 +239,7 @@ class SensorCard extends StatelessWidget {
     required this.unit,
     required this.icon,
     required this.glowColor,
+    this.isLoading = false,
   });
 
   @override
@@ -106,9 +250,7 @@ class SensorCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1A2235),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: glowColor.withOpacity(0.7),
-        ),
+        border: Border.all(color: glowColor.withOpacity(0.7)),
 
         boxShadow: [
           BoxShadow(
@@ -123,8 +265,7 @@ class SensorCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment:
-                MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 title,
@@ -135,31 +276,40 @@ class SensorCard extends StatelessWidget {
                 ),
               ),
 
-              Icon(
-                icon,
-                color: glowColor,
-                size: 18,
-              ),
+              Icon(icon, color: glowColor, size: 18),
             ],
           ),
 
           const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 40,
-              fontWeight: FontWeight.w300,
+          if (isLoading)
+            SizedBox(
+              height: 40,
+              child: Center(
+                child: SizedBox(
+                  width: 30,
+                  height: 30,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(glowColor),
+                  ),
+                ),
+              ),
+            )
+          else
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 40,
+                fontWeight: FontWeight.w300,
+              ),
             ),
-          ),
 
-          Text(
-            unit,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
+          if (!isLoading)
+            Text(
+              unit,
+              style: const TextStyle(color: Colors.white, fontSize: 24),
             ),
-          ),
 
           const Spacer(),
           Container(
@@ -187,7 +337,16 @@ class SensorCard extends StatelessWidget {
 }
 
 class TelemetryCard extends StatelessWidget {
-  const TelemetryCard({super.key});
+  final String lastUpdate;
+  final String radarValue;
+  final bool isDataFresh;
+
+  const TelemetryCard({
+    super.key,
+    this.lastUpdate = 'Never',
+    this.radarValue = '0.00',
+    this.isDataFresh = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -196,9 +355,7 @@ class TelemetryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1A2235),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.cyanAccent.withOpacity(0.4),
-        ),
+        border: Border.all(color: Colors.cyanAccent.withOpacity(0.4)),
       ),
 
       child: Column(
@@ -206,18 +363,39 @@ class TelemetryCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(18),
             child: Row(
-              children: const [
-                Icon(
-                  Icons.query_stats,
-                  color: Colors.cyanAccent,
+              children: [
+                Icon(Icons.query_stats, color: Colors.cyanAccent),
+
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    "REAL-TIME TELEMETRY",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
 
-                SizedBox(width: 10),
-                Text(
-                  "REAL-TIME GRAPH PLOTTER",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
+                // Status indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDataFresh
+                        ? Colors.green.withOpacity(0.2)
+                        : Colors.orange.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    isDataFresh ? 'LIVE' : 'CACHED',
+                    style: TextStyle(
+                      color: isDataFresh ? Colors.green : Colors.orange,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -225,20 +403,62 @@ class TelemetryCard extends StatelessWidget {
           ),
 
           const Spacer(),
-          const Icon(
-            Icons.show_chart,
-            size: 70,
-            color: Colors.cyanAccent,
+
+          // Radar value display
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Column(
+                children: [
+                  Icon(Icons.radar, size: 40, color: Colors.cyanAccent),
+                  const SizedBox(height: 8),
+                  Text(
+                    'MOTION/RADAR',
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 9,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    radarValue,
+                    style: const TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+
+              // Last update time
+              Column(
+                children: [
+                  Icon(Icons.schedule, size: 40, color: Colors.amber),
+                  const SizedBox(height: 8),
+                  Text(
+                    'LAST UPDATE',
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 9,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    lastUpdate,
+                    style: const TextStyle(
+                      color: Colors.amber,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
 
-          const SizedBox(height: 10),
-          const Text(
-            "Waiting for ESP32 BLE Stream...",
-            style: TextStyle(
-              color: Colors.white38,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
           const Spacer(),
         ],
       ),

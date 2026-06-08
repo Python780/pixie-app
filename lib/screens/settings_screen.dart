@@ -127,7 +127,7 @@ class SettingsScreen extends StatelessWidget {
 
               onTap: () {
                 final provider = Provider.of<ConversationProvider>(context, listen: false);
-                final TextEditingController _dialogController = TextEditingController(text: provider.geminiApiKey);
+                final TextEditingController dialogController = TextEditingController(text: provider.geminiApiKey);
 
                 showDialog(
                   context: context,
@@ -135,7 +135,7 @@ class SettingsScreen extends StatelessWidget {
                     backgroundColor: const Color(0xFF222222),
                     title: const Text("Gemini API Key", style: TextStyle(color: Colors.white)),
                     content: TextField(
-                      controller: _dialogController,
+                      controller: dialogController,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
                         hintText: "Enter your API key",
@@ -152,7 +152,7 @@ class SettingsScreen extends StatelessWidget {
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
                         onPressed: () async {
                           // 3. 执行保存逻辑
-                          await provider.updateGeminiApiKey(_dialogController.text.trim());
+                          await provider.updateGeminiApiKey(dialogController.text.trim());
                           Navigator.pop(context); // 关闭对话框
               
                           // 提示用户

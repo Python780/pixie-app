@@ -239,7 +239,7 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen> {
                       ],
                     ),
                   );
-                }).toList(),
+                }),
               ],
             ),
           );
