@@ -18,10 +18,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await dotenv.load(fileName: "assets/.env.example");
-    print('✅ Loaded credentials from assets/.env.example successfully');
+    await dotenv.load(fileName: "assets/.env");
+    print('✅ Loaded credentials from assets/.env successfully');
   } catch (e) {
-    print('❌ Critical Error: Could not load assets/.env.example: $e');
+    print('❌ Critical Error: Could not load assets/.env: $e');
   }
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -105,7 +105,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     super.initState();
 
     pages = [
-      // 主页
+      //main screen
       FaceScreen(provider: widget.conversationProvider),
 
       // Sensor Dashboard

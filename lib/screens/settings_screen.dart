@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/robot_provider.dart';
 import '../providers/conversation_provider.dart';
+import '../screens/DiagnosticsScreen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -96,15 +97,14 @@ class SettingsScreen extends StatelessWidget {
             // ================= SENSOR =================
 
             SettingsCard(
-              icon: Icons.sensors_rounded,
+              icon: Icons.monitor_heart_rounded, // 改用心跳图标，代表健康状态
               iconColor: Colors.orangeAccent,
-              title: "Sensor Diagnostics",
-              subtitle:
-                  "Check LD2450 and robot sensors",
-
+              title: "Hardware Diagnostics", // 改名
+              subtitle: "Check connectivity, battery & sensors", // 描述更新
               onTap: () {
-
-                // future page
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+                );
               },
             ),
 
@@ -122,54 +122,102 @@ class SettingsScreen extends StatelessWidget {
               icon: Icons.psychology_alt_rounded,
               iconColor: Colors.purpleAccent,
               title: "Gemini AI",
-              subtitle:
-                  "Conversation and emotion engine",
-
+              subtitle: "Conversation and emotion engine",
               onTap: () {
                 final provider = Provider.of<ConversationProvider>(context, listen: false);
                 final TextEditingController dialogController = TextEditingController(text: provider.geminiApiKey);
 
                 showDialog(
                   context: context,
-                  builder: (context) => AlertDialog(
-                    backgroundColor: const Color(0xFF222222),
-                    title: const Text("Gemini API Key", style: TextStyle(color: Colors.white)),
-                    content: TextField(
-                      controller: dialogController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: "Enter your API key",
-                        hintStyle: TextStyle(color: Colors.white54),
-                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.cyanAccent)),
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context), // 取消
-                        child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
-                        onPressed: () async {
-                          // 3. 执行保存逻辑
-                          await provider.updateGeminiApiKey(dialogController.text.trim());
-                          Navigator.pop(context); // 关闭对话框
-              
-                          // 提示用户
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Gemini API Key saved!")),
-                          );
-                        },
-                        child: const Text("Save", style: TextStyle(color: Colors.black)),
-                      ),
-                    ],
-                  ),
+                  builder: (context) {
+                    bool isObscured = true; // 初始隐藏密码
+
+                    return StatefulBuilder(
+                      builder: (context, setDialogState) {
+                        bool hasKey = dialogController.text.isNotEmpty;
+
+                        return AlertDialog(
+                          backgroundColor: const Color(0xFF222222),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          title: const Text("Gemini API Key", style: TextStyle(color: Colors.white)),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              TextField(
+                                controller: dialogController,
+                                obscureText: isObscured, // 🌟 状态映射
+                                style: const TextStyle(color: Colors.white),
+                                onChanged: (value) {
+                                  setDialogState(() {}); // 实时捕捉输入以更新检测状态
+                                },
+                                decoration: InputDecoration(
+                                  hintText: "Enter your API key",
+                                  hintStyle: const TextStyle(color: Colors.white54),
+                                  enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.cyanAccent)),
+                                  focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.cyanAccent, width: 2)),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      isObscured ? Icons.visibility_off : Icons.visibility,
+                                      color: Colors.white54,
+                                    ),
+                                    onPressed: () {
+                                      // 🌟 点击切换局部显示隐藏状态
+                                      setDialogState(() {
+                                        isObscured = !isObscured;
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  Icon(
+                                    hasKey ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+                                    color: hasKey ? Colors.greenAccent : Colors.amberAccent,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    hasKey ? "Status: API Key Detected" : "Status: Key Empty",
+                                    style: TextStyle(
+                                      color: hasKey ? Colors.greenAccent : Colors.amberAccent,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.cyanAccent),
+                              onPressed: () async {
+                                await provider.updateGeminiApiKey(dialogController.text.trim());
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("Gemini API Key saved!")),
+                                );
+                              },
+                              child: const Text("Save", style: TextStyle(color: Colors.black)),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
                 );
               },
             ),
 
             const SizedBox(height: 18),
-
+            // ================= VOICE SYSTEM =================
             SettingsCard(
               icon: Icons.mic_rounded,
               iconColor: Colors.cyanAccent,
@@ -312,13 +360,9 @@ class SettingsCard extends StatelessWidget {
       onTap: onTap,
 
       child: Container(
-
         padding: const EdgeInsets.all(18),
-
         decoration: BoxDecoration(
-
           color: const Color(0xFF22252E),
-
           borderRadius:
               BorderRadius.circular(28),
 
@@ -338,14 +382,11 @@ class SettingsCard extends StatelessWidget {
 
         child: Row(
           children: [
-
             Container(
               padding: const EdgeInsets.all(14),
-
               decoration: BoxDecoration(
                 color:
                     iconColor.withOpacity(0.15),
-
                 borderRadius:
                     BorderRadius.circular(18),
               ),
@@ -363,7 +404,6 @@ class SettingsCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
-
                 children: [
 
                   Text(
