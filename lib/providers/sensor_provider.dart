@@ -4,7 +4,7 @@ import 'dart:developer' as dev;
 import 'dart:async';
 
 class SensorProvider extends ChangeNotifier {
-  final ThingSpeakService _thinkSpeakService = ThingSpeakService();
+  final ThingSpeakService _thingSpeakService = ThingSpeakService();
 
   // Sensor data state
   SensorData? _currentData;
@@ -12,6 +12,7 @@ class SensorProvider extends ChangeNotifier {
 
   // UI state
   bool _isLoading = false;
+  bool _isRefreshing = false; // ✨ Added to prevent full-screen flashing during auto-refresh
   String? _errorMessage;
   DateTime? _lastUpdateTime;
 
@@ -26,6 +27,7 @@ class SensorProvider extends ChangeNotifier {
   SensorData? get currentData => _currentData;
   List<SensorData> get sensorHistory => _sensorHistory;
   bool get isLoading => _isLoading;
+  bool get isRefreshing => _isRefreshing; // Expose background refresh state if needed
   String? get errorMessage => _errorMessage;
   DateTime? get lastUpdateTime => _lastUpdateTime;
 
@@ -35,80 +37,71 @@ class SensorProvider extends ChangeNotifier {
 
   // --- INITIALIZATION ---
 
-  /// Configure ThinkSpeak credentials and start auto-refresh
-  void configureThinkSpeak({
+  /// Configure ThingSpeak credentials and start auto-refresh
+  void configureThingSpeak({
     required String channelId,
     required String apiKey,
     Duration autoRefreshInterval = const Duration(seconds: 30),
   }) {
-    dev.log('🔐 Configuring SensorProvider with ThinkSpeak credentials');
-    dev.log('   channelId: "$channelId"');
-    dev.log('   apiKey: "$apiKey"');
+    dev.log('🔐 Configuring SensorProvider with ThingSpeak credentials');
 
-    _thinkSpeakService.configure(channelId: channelId, apiKey: apiKey);
+    _thingSpeakService.configure(channelId: channelId, apiKey: apiKey);
 
-    dev.log(
-      '   Service channelId after configure: "${_thinkSpeakService.channelId}"',
-    );
-    dev.log(
-      '   Service apiKey after configure: "${_thinkSpeakService.apiKey}"',
-    );
+    // Fetch initial data with full loading screen indicator
+    fetchLatestData(isInitialFetch: true);
 
     // Start auto-refresh
     startAutoRefresh(interval: autoRefreshInterval);
-
-    // Fetch initial data
-    fetchLatestData();
   }
 
   // --- FETCH METHODS ---
 
-  /// Fetch latest sensor data from ThinkSpeak
-  Future<void> fetchLatestData() async {
-    _isLoading = true;
+  /// Fetch latest sensor data from ThingSpeak
+  /// [isInitialFetch] controls whether the screen triggers a full loading spinner or updates silently.
+  Future<void> fetchLatestData({bool isInitialFetch = false}) async {
+    if (isInitialFetch) {
+      _isLoading = true;
+    } else {
+      _isRefreshing = true;
+    }
+    
     _errorMessage = null;
     notifyListeners();
 
-    dev.log('🔍 fetchLatestData called at ${DateTime.now()}');
+    dev.log('🔍 fetchLatestData called at ${DateTime.now()} (Initial: $isInitialFetch)');
 
     try {
-      final data = await _thinkSpeakService.fetchLatestSensorData();
+      final data = await _thingSpeakService.fetchLatestSensorData();
 
       if (data != null) {
-        // Check if data actually changed
+        // Cache old values safely for logging before updating state
+        final oldTemp = _currentData?.temperature;
+        final oldHumidity = _currentData?.humidity;
+        final oldRadar = _currentData?.radar;
+
         final dataChanged =
             _currentData == null ||
-            _currentData!.temperature != data.temperature ||
-            _currentData!.humidity != data.humidity ||
-            _currentData!.radar != data.radar;
+            oldTemp != data.temperature ||
+            oldHumidity != data.humidity ||
+            oldRadar != data.radar;
 
         if (dataChanged) {
           dev.log('✅ NEW DATA RECEIVED:');
-          dev.log(
-            '   Temperature: ${_currentData?.temperature} → ${data.temperature}°C',
-          );
-          dev.log('   Humidity: ${_currentData?.humidity} → ${data.humidity}%');
-          dev.log('   Radar: ${_currentData?.radar} → ${data.radar}');
-          dev.log(
-            '   ThinkSpeak Entry ID: ${data.channelId} (updated at ${data.timestamp})',
-          );
+          dev.log('   Temperature: $oldTemp → ${data.temperature}°C');
+          dev.log('   Humidity: $oldHumidity → ${data.humidity}%');
+          dev.log('   Radar: $oldRadar → ${data.radar}');
         } else {
-          dev.log(
-            '⏸️ NO CHANGE: Same data as before (Entry ID: ${data.channelId})',
-          );
+          dev.log('⏸️ NO CHANGE: Same data as before');
         }
 
         _currentData = data;
         _lastUpdateTime = DateTime.now();
         _errorMessage = null;
       } else {
-        // Service returned null - could be many reasons
-        if (!_thinkSpeakService.isConfigured) {
-          _errorMessage =
-              '❌ ThinkSpeak not configured. Check .env for THINKSPEAK_CHANNEL_ID and THINKSPEAK_API_KEY';
+        if (!_thingSpeakService.isConfigured) {
+          _errorMessage = '❌ ThingSpeak not configured. Check configuration constants or your environment setup.';
         } else {
-          _errorMessage =
-              '❌ Failed to fetch sensor data - check console logs for details';
+          _errorMessage = '❌ Failed to fetch sensor data - check console logs for details';
         }
         dev.log('❌ $_errorMessage');
       }
@@ -117,6 +110,7 @@ class SensorProvider extends ChangeNotifier {
       dev.log('❌ Error fetching data: $e');
     } finally {
       _isLoading = false;
+      _isRefreshing = false;
       notifyListeners();
     }
   }
@@ -127,7 +121,7 @@ class SensorProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _sensorHistory = await _thinkSpeakService.fetchSensorHistory(
+      _sensorHistory = await _thingSpeakService.fetchSensorHistory(
         minutes: minutes,
         limit: limit,
       );
@@ -144,7 +138,7 @@ class SensorProvider extends ChangeNotifier {
   /// Get average sensor values
   Future<SensorData?> getAverageData({required int minutes}) async {
     try {
-      return await _thinkSpeakService.getAverageSensorData(minutes: minutes);
+      return await _thingSpeakService.getAverageSensorData(minutes: minutes);
     } catch (e) {
       dev.log('❌ Error getting average data: $e');
       return null;
@@ -157,7 +151,8 @@ class SensorProvider extends ChangeNotifier {
   void startAutoRefresh({Duration interval = const Duration(seconds: 30)}) {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(interval, (_) {
-      fetchLatestData();
+      // Background refreshes pass false to ensure silent background execution
+      fetchLatestData(isInitialFetch: false);
     });
     dev.log('🔄 Auto-refresh started (${interval.inSeconds}s interval)');
   }
@@ -170,36 +165,23 @@ class SensorProvider extends ChangeNotifier {
   }
 
   // --- UTILITY ---
-
-  /// Format temperature for display
   String get temperatureDisplay => '${temperature.toStringAsFixed(1)}°C';
-
-  /// Format humidity for display
   String get humidityDisplay => '${humidity.toStringAsFixed(0)}%';
+  String get radarDisplay => radar.toStringAsFixed(2);
 
-  /// Format radar value for display
-  String get radarDisplay => '${radar.toStringAsFixed(2)}';
-
-  /// Check if data is fresh (within last N seconds)
   bool isDataFresh({int withinSeconds = 60}) {
     if (_lastUpdateTime == null) return false;
     final diff = DateTime.now().difference(_lastUpdateTime!);
     return diff.inSeconds <= withinSeconds;
   }
 
-  /// Get time since last update
   String getTimeSinceUpdate() {
     if (_lastUpdateTime == null) return 'Never';
-
     final diff = DateTime.now().difference(_lastUpdateTime!);
 
-    if (diff.inSeconds < 60) {
-      return '${diff.inSeconds}s ago';
-    } else if (diff.inMinutes < 60) {
-      return '${diff.inMinutes}m ago';
-    } else {
-      return '${diff.inHours}h ago';
-    }
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    return '${diff.inHours}h ago';
   }
 
   @override

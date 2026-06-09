@@ -4,25 +4,21 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ThingSpeakService {
-  // 🔑 Configured via the configure() method
   String channelId = '';
   String apiKey = '';
   final String baseUrl = 'https://api.thingspeak.com';
 
-  // Field mapping documentation (for reference)
   static const String temperatureField = 'field1';
   static const String humidityField = 'field2';
-  static const String radarField = 'field3'; // Radar/Motion sensor
-  static const String customField4 = 'field4'; // Optional additional sensor
+  static const String radarField = 'field3'; 
+  static const String customField4 = 'field4'; 
 
-  /// Configure ThingSpeak credentials (call this at app startup)
   void configure({required String channelId, required String apiKey}) {
     this.channelId = channelId;
     this.apiKey = apiKey;
     dev.log('✅ ThingSpeak configured: Channel=$channelId');
   }
 
-  /// Check if ThingSpeak is properly configured
   bool get isConfigured => channelId.isNotEmpty && apiKey.isNotEmpty;
 
   /// Fetch latest sensor reading from ThingSpeak
@@ -38,50 +34,31 @@ class ThingSpeakService {
       );
 
       dev.log('📡 Fetching sensor data from ThingSpeak...');
-
-      // Uses Dart's native TimeoutException
       final response = await http.get(url).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
 
-        // Check if response has actual data
-        if (json == null || json.isEmpty) {
-          dev.log('❌ Empty response from ThingSpeak');
-          return null;
-        }
-
-        // Check if we have at least one field with data
-        bool hasData = false;
-        for (int i = 1; i <= 8; i++) {
-          if (json['field$i'] != null) {
-            hasData = true;
-            break;
-          }
-        }
-
-        if (!hasData) {
-          dev.log('❌ ThingSpeak channel has no field data');
-          dev.log('   Ensure ESP32 is sending data to ThingSpeak');
+        // ThingSpeak returns -1 or empty string if the channel has absolutely no entries yet
+        if (json == null || json is String || json.isEmpty || json['entry_id'] == null) {
+          dev.log('❌ Empty or invalid response from ThingSpeak. Ensure ESP32 has uploaded at least one data point.');
           return null;
         }
 
         final data = SensorData.fromJson(json);
+        
+        // Ensure at least one of your tracked fields isn't null
+        if (data.temperature == null && data.humidity == null && data.radar == null) {
+          dev.log('⚠️ Data container received, but target fields (1-3) are empty.');
+          return null;
+        }
+
         dev.log(
           '✅ Sensor data received: Temp=${data.temperature}°C, Humidity=${data.humidity}%, Radar=${data.radar}',
         );
         return data;
       } else {
         dev.log('❌ ThingSpeak API error: ${response.statusCode}');
-        
-        // Parse error message from response
-        try {
-          final errorJson = jsonDecode(response.body);
-          if (errorJson['error'] != null) {
-            dev.log('   Error: ${errorJson['error']}');
-          }
-        } catch (_) {}
-
         return null;
       }
     } on TimeoutException catch (e) {
@@ -113,6 +90,8 @@ class ThingSpeakService {
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
+        if (json == null || json['feeds'] == null) return [];
+        
         final feeds = json['feeds'] as List;
         final data = feeds.map((feed) => SensorData.fromJson(feed)).toList();
         dev.log('✅ Retrieved ${data.length} historical records');
@@ -135,7 +114,6 @@ class ThingSpeakService {
     double avgTemp = 0, avgHumidity = 0, avgRadar = 0;
     int tempCount = 0, humidityCount = 0, radarCount = 0;
 
-    // Increment counts only when the specific sensor data is not null
     for (final data in history) {
       if (data.temperature != null) {
         avgTemp += data.temperature!;
@@ -161,12 +139,11 @@ class ThingSpeakService {
   }
 }
 
-/// Model class for sensor data from ThingSpeak
 class SensorData {
-  final double? temperature; // Field1: Temperature in °C
-  final double? humidity;    // Field2: Humidity in %
-  final double? radar;       // Field3: Radar/Motion detection value
-  final double? field4;      // Optional additional sensor
+  final double? temperature; 
+  final double? humidity;    
+  final double? radar;       
+  final double? field4;      
   final DateTime? timestamp;
   final String? channelId;
 
@@ -179,9 +156,7 @@ class SensorData {
     this.channelId,
   });
 
-  /// Parse JSON response from ThingSpeak API
   factory SensorData.fromJson(Map<String, dynamic> json) {
-    // Hardcoded fields cleanly decouple the model from the service layer
     return SensorData(
       temperature: _parseDouble(json['field1']),
       humidity: _parseDouble(json['field2']),
@@ -194,7 +169,6 @@ class SensorData {
     );
   }
 
-  /// Helper to safely parse doubles from JSON
   static double? _parseDouble(dynamic value) {
     if (value == null) return null;
     if (value is double) return value;

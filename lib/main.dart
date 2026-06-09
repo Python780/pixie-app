@@ -15,20 +15,26 @@ import 'screens/settings_screen.dart';
 import 'screens/dashboard_screen.dart';
 
 void main() async {
+  // Ensure Flutter engine services are completely ready
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 1. Core Fix: Load .env synchronously before ANYTHING else initializes
   try {
-    await dotenv.load(fileName: "assets/.env");
-    print('✅ Loaded credentials from assets/.env successfully');
+    await dotenv.load(fileName: ".env");
+    print('✅ Loaded credentials from root .env successfully');
+    print('🔍 Available Keys: ${dotenv.env.keys.toList()}');
   } catch (e) {
-    print('❌ Critical Error: Could not load assets/.env: $e');
+    print('❌ Critical Error: Could not load root .env file: $e');
   }
 
+  // 2. Initialize Firebase infrastructure
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+  // 3. Set up and await your conversation provider sequence
   final conversationProvider = ConversationProvider();
   await conversationProvider.initialize();
 
+  // 4. Fire up the UI tree safely now that variables are stored in active RAM
   runApp(PixieRobotApp(provider: conversationProvider));
 }
 
@@ -46,7 +52,8 @@ class PixieRobotApp extends StatelessWidget {
         ChangeNotifierProvider<SensorProvider>(
           create: (_) {
             final sensorProvider = SensorProvider();
-            // Configure ThinkSpeak with credentials from .env
+            
+            // Fetch credentials directly out of global environment memory maps
             final channelId = dotenv.env['THINGSPEAK_CHANNEL_ID'];
             final apiKey = dotenv.env['THINGSPEAK_API_KEY'];
 
@@ -58,7 +65,7 @@ class PixieRobotApp extends StatelessWidget {
                 channelId.isNotEmpty && apiKey.isNotEmpty) {
               print('✅ Credentials loaded successfully');
               
-              sensorProvider.configureThinkSpeak(
+              sensorProvider.configureThingSpeak(
                 channelId: channelId,
                 apiKey: apiKey,
                 autoRefreshInterval: const Duration(seconds: 30),
@@ -79,7 +86,6 @@ class PixieRobotApp extends StatelessWidget {
           scaffoldBackgroundColor: const Color(0xFF0F0F1A),
           primarySwatch: Colors.cyan,
         ),
-
         home: MainNavigationScreen(conversationProvider: provider),
       ),
     );
@@ -97,7 +103,6 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int currentIndex = 0;
-
   late final List<Widget> pages;
 
   @override
@@ -105,14 +110,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     super.initState();
 
     pages = [
-      //main screen
       FaceScreen(provider: widget.conversationProvider),
-
-      // Sensor Dashboard
       const DashboardScreen(),
-      // Manual Controller
       const ControllerScreen(),
-      // Settings
       const SettingsScreen(),
     ];
   }
@@ -121,7 +121,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(index: currentIndex, children: pages),
-
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIndex,
         onDestinationSelected: (index) {
@@ -129,14 +128,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             currentIndex = index;
           });
         },
-
         destinations: const [
           NavigationDestination(icon: Icon(Icons.face), label: "Pixie"),
-
           NavigationDestination(icon: Icon(Icons.dashboard), label: "Monitor"),
-
           NavigationDestination(icon: Icon(Icons.gamepad), label: "Control"),
-
           NavigationDestination(icon: Icon(Icons.settings), label: "Settings"),
         ],
       ),
