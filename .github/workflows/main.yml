@@ -1,4 +1,50 @@
-- name: Create .env file from GitHub Secrets
-  run: |
-    echo "THINGSPEAK_CHANNEL_ID=${{ secrets.THINGSPEAK_CHANNEL_ID }}" >> .env
-    echo "THINGSPEAK_API_KEY=${{ secrets.THINGSPEAK_API_KEY }}" >> .env
+name: Build and Release Pixie APK
+
+on:
+  push:
+    branches:
+      - main  # This fires the build every time you push to the main branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout your code repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Setup Java environment required for Android compilation
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # 3. Setup Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      # 4. Inject your GitHub Repository Secrets into a fresh .env file
+      - name: Create .env file from GitHub Secrets
+        run: |
+          echo "THINGSPEAK_CHANNEL_ID=${{ secrets.THINGSPEAK_CHANNEL_ID }}" >> .env
+          echo "THINGSPEAK_API_KEY=${{ secrets.THINGSPEAK_API_KEY }}" >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+
+      # 5. Fetch dependencies and compile the APK
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 6. Compile the application into a release APK
+      - name: Build APK
+        run: flutter build apk --release
+
+      # 7. Upload the finished APK as a downloadable file on your Actions tab
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixie-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
