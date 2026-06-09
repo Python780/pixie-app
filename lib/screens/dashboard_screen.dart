@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import '../providers/sensor_provider.dart';
 
@@ -11,57 +10,65 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  String? _lastError;
+  late SensorProvider _sensorProvider;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
+  void initState() {
+    super.initState();
+    // Bind a one-time listener after the first frame renders
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _sensorProvider = Provider.of<SensorProvider>(context, listen: false);
+      _sensorProvider.addListener(_errorListener);
+    });
+  }
 
-    // Listen for errors from SensorProvider
-    final sensorProvider = context.watch<SensorProvider>();
-
-    if (sensorProvider.errorMessage != null &&
-        sensorProvider.errorMessage != _lastError) {
-      _lastError = sensorProvider.errorMessage;
-
-      // Defer SnackBar to post-frame callback to avoid build-phase errors
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.error, color: Colors.white),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      sensorProvider.errorMessage!,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
+  // Dedicated error listener: Handles side-effects without triggering whole-page rebuilds
+  void _errorListener() {
+    if (!mounted) return;
+    
+    final error = _sensorProvider.errorMessage;
+    if (error != null && error.isNotEmpty) {
+      // Dismiss the previous SnackBar before showing a new one
+      ScaffoldMessenger.of(context).hideCurrentSnackBar(); 
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(error, style: const TextStyle(color: Colors.white)),
               ),
-              backgroundColor: Colors.red.shade700,
-              duration: const Duration(seconds: 5),
-              action: SnackBarAction(
-                label: 'RETRY',
-                textColor: Colors.cyanAccent,
-                onPressed: () {
-                  sensorProvider.fetchLatestData();
-                },
-              ),
-            ),
-          );
-        }
-      });
+            ],
+          ),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'RETRY',
+            textColor: Colors.cyanAccent,
+            onPressed: () {
+              // context.read does not trigger rebuilds
+              context.read<SensorProvider>().fetchLatestData();
+            },
+          ),
+        ),
+      );
     }
   }
 
   @override
+  void dispose() {
+    // Always remove listeners to prevent memory leaks
+    _sensorProvider.removeListener(_errorListener);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Zero top-level watchers here. High-frequency data streams 
+    // will now only repaint their respective Consumer components.
     return Scaffold(
       backgroundColor: const Color(0xFF071126),
-
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -74,16 +81,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         actions: [
-          // Refresh button
           Padding(
             padding: const EdgeInsets.all(16),
             child: Consumer<SensorProvider>(
-              builder: (context, sensorProvider, _) {
+              builder: (context, provider, _) {
                 return Center(
-                  child: GestureDetector(
-                    onTap: () {
-                      sensorProvider.fetchLatestData();
-                    },
+                  // InkWell adds the premium touch feedback ripple effect
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: provider.isLoading ? null : () => provider.fetchLatestData(),
                     child: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -91,7 +97,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
-                        sensorProvider.isLoading ? Icons.sync : Icons.refresh,
+                        provider.isLoading ? Icons.sync : Icons.refresh,
                         color: Colors.cyanAccent,
                         size: 20,
                       ),
@@ -103,18 +109,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Error banner
+            // Error Banner (Conditionally Rendered)
             Consumer<SensorProvider>(
-              builder: (context, sensorProvider, _) {
-                if (sensorProvider.errorMessage != null &&
-                    sensorProvider.errorMessage!.isNotEmpty) {
+              builder: (context, provider, _) {
+                if (provider.errorMessage != null && provider.errorMessage!.isNotEmpty) {
                   return Column(
                     children: [
                       Container(
@@ -122,26 +125,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         decoration: BoxDecoration(
                           color: Colors.red.shade900.withOpacity(0.3),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: Colors.red.shade700,
-                            width: 1,
-                          ),
+                          border: Border.all(color: Colors.red.shade700, width: 1),
                         ),
                         child: Row(
                           children: [
-                            Icon(
-                              Icons.warning,
-                              color: Colors.red.shade400,
-                              size: 20,
-                            ),
+                            Icon(Icons.warning, color: Colors.red.shade400, size: 20),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                sensorProvider.errorMessage!,
-                                style: TextStyle(
-                                  color: Colors.red.shade300,
-                                  fontSize: 13,
-                                ),
+                                provider.errorMessage!,
+                                style: TextStyle(color: Colors.red.shade300, fontSize: 13),
                               ),
                             ),
                           ],
@@ -157,38 +150,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             const Text(
               "ENVIRONMENTAL SENSORS",
-              style: TextStyle(
-                color: Colors.white54,
-                letterSpacing: 2,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.white54, letterSpacing: 2, fontSize: 12),
             ),
-
             const SizedBox(height: 16),
+
+            // Sensor Metrics Section
             Consumer<SensorProvider>(
-              builder: (context, sensorProvider, _) {
+              builder: (context, provider, _) {
                 return Row(
                   children: [
                     Expanded(
                       child: SensorCard(
                         title: "TEMPERATURE",
-                        value: sensorProvider.temperatureDisplay,
+                        value: provider.temperatureDisplay,
                         unit: "°C",
                         icon: Icons.thermostat,
                         glowColor: Colors.orange,
-                        isLoading: sensorProvider.isLoading,
+                        isLoading: provider.isLoading,
                       ),
                     ),
-
                     const SizedBox(width: 16),
                     Expanded(
                       child: SensorCard(
                         title: "HUMIDITY",
-                        value: sensorProvider.humidityDisplay,
+                        value: provider.humidityDisplay,
                         unit: "%",
                         icon: Icons.water_drop,
                         glowColor: Colors.cyanAccent,
-                        isLoading: sensorProvider.isLoading,
+                        isLoading: provider.isLoading,
                       ),
                     ),
                   ],
@@ -199,20 +188,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 32),
             const Text(
               "SYSTEM TELEMETRY",
-              style: TextStyle(
-                color: Colors.white54,
-                letterSpacing: 2,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.white54, letterSpacing: 2, fontSize: 12),
             ),
-
             const SizedBox(height: 16),
+
+            // System Logs Section
             Consumer<SensorProvider>(
-              builder: (context, sensorProvider, _) {
+              builder: (context, provider, _) {
                 return TelemetryCard(
-                  lastUpdate: sensorProvider.getTimeSinceUpdate(),
-                  radarValue: sensorProvider.radarDisplay,
-                  isDataFresh: sensorProvider.isDataFresh(),
+                  lastUpdate: provider.getTimeSinceUpdate(),
+                  radarValue: provider.radarDisplay,
+                  isDataFresh: provider.isDataFresh(),
                 );
               },
             ),
@@ -245,91 +231,75 @@ class SensorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 170,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2235),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: glowColor.withOpacity(0.7)),
-
+        color: const Color(0xFF111C33), // Darker panel color
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: glowColor.withOpacity(0.3),
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: glowColor.withOpacity(0.2),
-            blurRadius: 20,
+            color: glowColor.withOpacity(0.1),
+            blurRadius: 10,
             spreadRadius: 1,
           ),
         ],
       ),
-
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 11,
-                  letterSpacing: 1.5,
+              Icon(icon, color: glowColor, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    letterSpacing: 1,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-
-              Icon(icon, color: glowColor, size: 18),
             ],
           ),
-
-          const Spacer(),
-          if (isLoading)
-            SizedBox(
-              height: 40,
-              child: Center(
-                child: SizedBox(
-                  width: 30,
-                  height: 30,
+          const SizedBox(height: 16),
+          isLoading
+              ? const SizedBox(
+                  height: 40,
+                  width: 40,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(glowColor),
+                    color: Colors.white54,
                   ),
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      value,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      unit,
+                      style: TextStyle(
+                        color: glowColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            )
-          else
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 40,
-                fontWeight: FontWeight.w300,
-              ),
-            ),
-
-          if (!isLoading)
-            Text(
-              unit,
-              style: const TextStyle(color: Colors.white, fontSize: 24),
-            ),
-
-          const Spacer(),
-          Container(
-            height: 5,
-            decoration: BoxDecoration(
-              color: Colors.black26,
-              borderRadius: BorderRadius.circular(10),
-            ),
-
-            child: FractionallySizedBox(
-              alignment: Alignment.centerLeft,
-              widthFactor: 0.65,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: glowColor,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -343,125 +313,127 @@ class TelemetryCard extends StatelessWidget {
 
   const TelemetryCard({
     super.key,
-    this.lastUpdate = 'Never',
-    this.radarValue = '0.00',
-    this.isDataFresh = false,
+    required this.lastUpdate,
+    required this.radarValue,
+    required this.isDataFresh,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 220,
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2235),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.cyanAccent.withOpacity(0.4)),
+        color: const Color(0xFF111C33),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.cyanAccent.withOpacity(0.1),
+          width: 1,
+        ),
       ),
-
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              children: [
-                Icon(Icons.query_stats, color: Colors.cyanAccent),
-
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text(
-                    "REAL-TIME TELEMETRY",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-
-                // Status indicator
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isDataFresh
-                        ? Colors.green.withOpacity(0.2)
-                        : Colors.orange.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    isDataFresh ? 'LIVE' : 'CACHED',
-                    style: TextStyle(
-                      color: isDataFresh ? Colors.green : Colors.orange,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          // Radar Status Row
+          _buildTelemetryRow(
+            icon: Icons.radar,
+            label: "RADAR / MOTION",
+            value: radarValue,
+            valueColor: radarValue.contains("DETECTED") 
+                ? Colors.redAccent 
+                : Colors.cyanAccent,
           ),
-
-          const Spacer(),
-
-          // Radar value display
+          
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Divider(color: Colors.white10, height: 1),
+          ),
+          
+          // Last Update Row
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
+              const Row(
                 children: [
-                  Icon(Icons.radar, size: 40, color: Colors.cyanAccent),
-                  const SizedBox(height: 8),
+                  Icon(Icons.access_time, color: Colors.white54, size: 16),
+                  SizedBox(width: 8),
                   Text(
-                    'MOTION/RADAR',
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 9,
+                    "LAST SYNC",
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
                       letterSpacing: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    radarValue,
-                    style: const TextStyle(
-                      color: Colors.cyanAccent,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
               ),
-
-              // Last update time
-              Column(
+              Row(
                 children: [
-                  Icon(Icons.schedule, size: 40, color: Colors.amber),
-                  const SizedBox(height: 8),
-                  Text(
-                    'LAST UPDATE',
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 9,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
                   Text(
                     lastUpdate,
                     style: const TextStyle(
-                      color: Colors.amber,
+                      color: Colors.white,
                       fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                      fontFamily: 'Courier', // Gives it a terminal/log feel
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Freshness Indicator Dot
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isDataFresh ? Colors.greenAccent : Colors.redAccent,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (isDataFresh ? Colors.greenAccent : Colors.redAccent).withOpacity(0.5),
+                          blurRadius: 6,
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ],
           ),
-
-          const Spacer(),
         ],
       ),
+    );
+  }
+
+  // Helper method to keep the code clean
+  Widget _buildTelemetryRow({
+    required IconData icon, 
+    required String label, 
+    required String value,
+    required Color valueColor,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: Colors.white54, size: 16),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+                letterSpacing: 1,
+              ),
+            ),
+          ],
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: valueColor,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1,
+          ),
+        ),
+      ],
     );
   }
 }

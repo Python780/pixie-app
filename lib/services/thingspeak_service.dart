@@ -1,40 +1,34 @@
+import 'dart:async'; // Native Dart timeouts
 import 'dart:developer' as dev;
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 
-class ThinkSpeakService {
-  // 🔑 These will be set by configure() method
-  late String channelId;
-  late String apiKey;
+class ThingSpeakService {
+  // 🔑 Configured via the configure() method
+  String channelId = '';
+  String apiKey = '';
   final String baseUrl = 'https://api.thingspeak.com';
 
-  // Field mapping (customize based on your ESP32 setup)
+  // Field mapping documentation (for reference)
   static const String temperatureField = 'field1';
   static const String humidityField = 'field2';
   static const String radarField = 'field3'; // Radar/Motion sensor
   static const String customField4 = 'field4'; // Optional additional sensor
 
-  ThinkSpeakService() {
-    channelId = '';
-    apiKey = '';
-  }
-
-  /// Configure ThinkSpeak credentials (call this at app startup)
+  /// Configure ThingSpeak credentials (call this at app startup)
   void configure({required String channelId, required String apiKey}) {
     this.channelId = channelId;
     this.apiKey = apiKey;
-    dev.log('✅ ThinkSpeak configured: Channel=$channelId');
+    dev.log('✅ ThingSpeak configured: Channel=$channelId');
   }
 
-  /// Check if ThinkSpeak is properly configured
+  /// Check if ThingSpeak is properly configured
   bool get isConfigured => channelId.isNotEmpty && apiKey.isNotEmpty;
 
-  /// Fetch latest sensor reading from ThinkSpeak
+  /// Fetch latest sensor reading from ThingSpeak
   Future<SensorData?> fetchLatestSensorData() async {
-    if (channelId.isEmpty || apiKey.isEmpty) {
-      dev.log('❌ ThinkSpeak credentials not configured');
-      dev.log('   channelId: "$channelId" (empty: ${channelId.isEmpty})');
-      dev.log('   apiKey: "$apiKey" (empty: ${apiKey.isEmpty})');
+    if (!isConfigured) {
+      dev.log('❌ ThingSpeak credentials not configured');
       return null;
     }
 
@@ -43,32 +37,20 @@ class ThinkSpeakService {
         '$baseUrl/channels/$channelId/feeds/last.json?api_key=$apiKey',
       );
 
-      dev.log('📡 Fetching sensor data from ThinkSpeak...');
-      dev.log('   URL: $url');
+      dev.log('📡 Fetching sensor data from ThingSpeak...');
 
-      final response = await http
-          .get(url)
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () {
-              throw TimeoutException('ThinkSpeak API timeout');
-            },
-          );
-
-      dev.log('📊 Response status: ${response.statusCode}');
-      dev.log('📊 Response body: ${response.body}');
+      // Uses Dart's native TimeoutException
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
 
         // Check if response has actual data
         if (json == null || json.isEmpty) {
-          dev.log('❌ Empty response from ThinkSpeak');
-          dev.log('   Response: ${response.body}');
+          dev.log('❌ Empty response from ThingSpeak');
           return null;
         }
 
-        // For /last.json endpoint, we get a single object
         // Check if we have at least one field with data
         bool hasData = false;
         for (int i = 1; i <= 8; i++) {
@@ -79,9 +61,8 @@ class ThinkSpeakService {
         }
 
         if (!hasData) {
-          dev.log('❌ ThinkSpeak channel has no field data');
-          dev.log('   Response: ${response.body}');
-          dev.log('   Ensure ESP32 is sending data to ThinkSpeak');
+          dev.log('❌ ThingSpeak channel has no field data');
+          dev.log('   Ensure ESP32 is sending data to ThingSpeak');
           return null;
         }
 
@@ -89,25 +70,10 @@ class ThinkSpeakService {
         dev.log(
           '✅ Sensor data received: Temp=${data.temperature}°C, Humidity=${data.humidity}%, Radar=${data.radar}',
         );
-        dev.log(
-          '   Entry ID: ${json['entry_id']} (created: ${json['created_at']})',
-        );
-        dev.log('   Parsed values:');
-        dev.log(
-          '   - Temperature: ${data.temperature} (raw: ${json[ThinkSpeakService.temperatureField]})',
-        );
-        dev.log(
-          '   - Humidity: ${data.humidity} (raw: ${json[ThinkSpeakService.humidityField]})',
-        );
-        dev.log(
-          '   - Radar: ${data.radar} (raw: ${json[ThinkSpeakService.radarField]})',
-        );
-        dev.log('   - Timestamp: ${data.timestamp}');
         return data;
       } else {
-        dev.log('❌ ThinkSpeak API error: ${response.statusCode}');
-        dev.log('   Response: ${response.body}');
-
+        dev.log('❌ ThingSpeak API error: ${response.statusCode}');
+        
         // Parse error message from response
         try {
           final errorJson = jsonDecode(response.body);
@@ -123,7 +89,6 @@ class ThinkSpeakService {
       return null;
     } catch (e) {
       dev.log('❌ Error fetching sensor data: $e');
-      dev.log('   Stack trace: $e');
       return null;
     }
   }
@@ -133,8 +98,8 @@ class ThinkSpeakService {
     required int minutes,
     int limit = 100,
   }) async {
-    if (channelId.isEmpty || apiKey.isEmpty) {
-      dev.log('❌ ThinkSpeak credentials not configured');
+    if (!isConfigured) {
+      dev.log('❌ ThingSpeak credentials not configured');
       return [];
     }
 
@@ -143,7 +108,7 @@ class ThinkSpeakService {
         '$baseUrl/channels/$channelId/feeds.json?api_key=$apiKey&minutes=$minutes&results=$limit',
       );
 
-      dev.log('📊 Fetching sensor history from ThinkSpeak...');
+      dev.log('📊 Fetching sensor history from ThingSpeak...');
       final response = await http.get(url).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
@@ -153,7 +118,7 @@ class ThinkSpeakService {
         dev.log('✅ Retrieved ${data.length} historical records');
         return data;
       } else {
-        dev.log('❌ ThinkSpeak API error: ${response.statusCode}');
+        dev.log('❌ ThingSpeak API error: ${response.statusCode}');
         return [];
       }
     } catch (e) {
@@ -167,40 +132,41 @@ class ThinkSpeakService {
     final history = await fetchSensorHistory(minutes: minutes);
     if (history.isEmpty) return null;
 
-    double avgTemp = 0;
-    double avgHumidity = 0;
-    double avgRadar = 0;
-    int count = 0;
+    double avgTemp = 0, avgHumidity = 0, avgRadar = 0;
+    int tempCount = 0, humidityCount = 0, radarCount = 0;
 
+    // Increment counts only when the specific sensor data is not null
     for (final data in history) {
       if (data.temperature != null) {
         avgTemp += data.temperature!;
+        tempCount++;
       }
       if (data.humidity != null) {
         avgHumidity += data.humidity!;
+        humidityCount++;
       }
       if (data.radar != null) {
         avgRadar += data.radar!;
+        radarCount++;
       }
-      count++;
     }
 
     return SensorData(
-      temperature: count > 0 ? avgTemp / count : null,
-      humidity: count > 0 ? avgHumidity / count : null,
-      radar: count > 0 ? avgRadar / count : null,
+      temperature: tempCount > 0 ? avgTemp / tempCount : null,
+      humidity: humidityCount > 0 ? avgHumidity / humidityCount : null,
+      radar: radarCount > 0 ? avgRadar / radarCount : null,
       timestamp: DateTime.now(),
       channelId: channelId,
     );
   }
 }
 
-/// Model class for sensor data from ThinkSpeak
+/// Model class for sensor data from ThingSpeak
 class SensorData {
   final double? temperature; // Field1: Temperature in °C
-  final double? humidity; // Field2: Humidity in %
-  final double? radar; // Field3: Radar/Motion detection value
-  final double? field4; // Optional additional sensor
+  final double? humidity;    // Field2: Humidity in %
+  final double? radar;       // Field3: Radar/Motion detection value
+  final double? field4;      // Optional additional sensor
   final DateTime? timestamp;
   final String? channelId;
 
@@ -213,12 +179,13 @@ class SensorData {
     this.channelId,
   });
 
-  /// Parse JSON response from ThinkSpeak API
+  /// Parse JSON response from ThingSpeak API
   factory SensorData.fromJson(Map<String, dynamic> json) {
+    // Hardcoded fields cleanly decouple the model from the service layer
     return SensorData(
-      temperature: _parseDouble(json[ThinkSpeakService.temperatureField]),
-      humidity: _parseDouble(json[ThinkSpeakService.humidityField]),
-      radar: _parseDouble(json[ThinkSpeakService.radarField]),
+      temperature: _parseDouble(json['field1']),
+      humidity: _parseDouble(json['field2']),
+      radar: _parseDouble(json['field3']),
       field4: _parseDouble(json['field4']),
       timestamp: json['created_at'] != null
           ? DateTime.parse(json['created_at'])
@@ -240,12 +207,4 @@ class SensorData {
   String toString() {
     return 'SensorData(temp: $temperature°C, humidity: $humidity%, radar: $radar)';
   }
-}
-
-class TimeoutException implements Exception {
-  final String message;
-  TimeoutException(this.message);
-
-  @override
-  String toString() => message;
 }

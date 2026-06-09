@@ -1,10 +1,10 @@
 import 'package:flutter/foundation.dart';
-import '../services/thinkspeak_service.dart';
+import '../services/thingspeak_service.dart';
 import 'dart:developer' as dev;
 import 'dart:async';
 
 class SensorProvider extends ChangeNotifier {
-  final ThinkSpeakService _thinkSpeakService = ThinkSpeakService();
+  final ThingSpeakService _thinkSpeakService = ThingSpeakService();
 
   // Sensor data state
   SensorData? _currentData;

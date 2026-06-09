@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:pixie/providers/conversation_provider.dart';
 import 'package:pixie/providers/robot_provider.dart';
@@ -19,46 +18,15 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    // Load .env from assets (works on all platforms including web)
-    final envString = await rootBundle.loadString('assets/.env');
-    // Parse the env string into a map that dotenv can use
-    final envMap = <String, String>{};
-    for (final line in envString.split('\n')) {
-      if (line.isEmpty || line.startsWith('#')) continue;
-      final parts = line.split('=');
-      if (parts.length == 2) {
-        envMap[parts[0].trim()] = parts[1].trim();
-      }
-    }
-    // Load the parsed map into dotenv
-    await dotenv.load(mergeWith: envMap);
-    print('✅ Loaded .env from assets successfully');
+    await dotenv.load(fileName: "assets/.env.example");
+    print('✅ Loaded credentials from assets/.env.example successfully');
   } catch (e) {
-    print('⚠️ Could not load .env from assets: $e');
-    try {
-      // Fallback to .env.example from assets
-      final exampleString = await rootBundle.loadString('assets/.env.example');
-      final envMap = <String, String>{};
-      for (final line in exampleString.split('\n')) {
-        if (line.isEmpty || line.startsWith('#')) continue;
-        final parts = line.split('=');
-        if (parts.length == 2) {
-          envMap[parts[0].trim()] = parts[1].trim();
-        }
-      }
-      await dotenv.load(mergeWith: envMap);
-      print(
-        '⚠️ Using .env.example from assets. Add real credentials to assets/.env!',
-      );
-    } catch (e2) {
-      print('❌ Could not load .env.example either: $e2');
-    }
+    print('❌ Critical Error: Could not load assets/.env.example: $e');
   }
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final conversationProvider = ConversationProvider();
-
   await conversationProvider.initialize();
 
   runApp(PixieRobotApp(provider: conversationProvider));
@@ -79,23 +47,24 @@ class PixieRobotApp extends StatelessWidget {
           create: (_) {
             final sensorProvider = SensorProvider();
             // Configure ThinkSpeak with credentials from .env
-            final channelId = dotenv.env['THINKSPEAK_CHANNEL_ID'];
-            final apiKey = dotenv.env['THINKSPEAK_API_KEY'];
+            final channelId = dotenv.env['THINGSPEAK_CHANNEL_ID'];
+            final apiKey = dotenv.env['THINGSPEAK_API_KEY'];
 
-            print('🔍 DEBUG: Loading ThinkSpeak credentials from .env');
+            print('🔍 DEBUG: Loading ThingSpeak credentials from .env');
             print('   channelId from .env: "$channelId"');
             print('   apiKey from .env: "$apiKey"');
 
-            if (channelId != null &&
-                apiKey != null &&
-                channelId.isNotEmpty &&
-                apiKey.isNotEmpty) {
+            if (channelId != null && apiKey != null &&
+                channelId.isNotEmpty && apiKey.isNotEmpty) {
               print('✅ Credentials loaded successfully');
+              
               sensorProvider.configureThinkSpeak(
                 channelId: channelId,
                 apiKey: apiKey,
                 autoRefreshInterval: const Duration(seconds: 30),
               );
+            } else {
+              print('❌ Missing or empty ThingSpeak credentials in .env');
             }
             return sensorProvider;
           },
@@ -104,7 +73,7 @@ class PixieRobotApp extends StatelessWidget {
 
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: "Pixie AI Robot",
+        title: "Pixie Pet",
         theme: ThemeData(
           brightness: Brightness.dark,
           scaffoldBackgroundColor: const Color(0xFF0F0F1A),
