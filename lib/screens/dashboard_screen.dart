@@ -15,20 +15,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // Bind a one-time listener after the first frame renders
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _sensorProvider = Provider.of<SensorProvider>(context, listen: false);
       _sensorProvider.addListener(_errorListener);
     });
   }
 
-  // Dedicated error listener: Handles side-effects without triggering whole-page rebuilds
   void _errorListener() {
     if (!mounted) return;
     
     final error = _sensorProvider.errorMessage;
     if (error != null && error.isNotEmpty) {
-      // Dismiss the previous SnackBar before showing a new one
       ScaffoldMessenger.of(context).hideCurrentSnackBar(); 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -47,7 +44,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: 'RETRY',
             textColor: Colors.cyanAccent,
             onPressed: () {
-              // context.read does not trigger rebuilds
               context.read<SensorProvider>().fetchLatestData();
             },
           ),
@@ -58,152 +54,158 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    // Always remove listeners to prevent memory leaks
     _sensorProvider.removeListener(_errorListener);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Zero top-level watchers here. High-frequency data streams 
-    // will now only repaint their respective Consumer components.
     return Scaffold(
-      backgroundColor: const Color(0xFF071126),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text(
-          "DASHBOARD",
-          style: TextStyle(
-            color: Colors.white,
-            letterSpacing: 1.5,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Consumer<SensorProvider>(
-              builder: (context, provider, _) {
-                return Center(
-                  // InkWell adds the premium touch feedback ripple effect
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: provider.isLoading ? null : () => provider.fetchLatestData(),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.cyanAccent.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        provider.isLoading ? Icons.sync : Icons.refresh,
-                        color: Colors.cyanAccent,
-                        size: 20,
-                      ),
+      backgroundColor: const Color(0xFF181A20),
+      // FIXED: Wrapped the body inside a SafeArea to fix structural shifts caused by notches or status bars
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              
+              // ================= FIXED CUSTOM APP BAR ROW =================
+              // Replaced the buggy AppBar widget with a flexible custom Row layout 
+              // to fully prevent the refresh button container from being clipped.
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "DASHBOARD",
+                    style: TextStyle(
+                      color: Colors.white,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 20,
                     ),
                   ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Error Banner (Conditionally Rendered)
-            Consumer<SensorProvider>(
-              builder: (context, provider, _) {
-                if (provider.errorMessage != null && provider.errorMessage!.isNotEmpty) {
-                  return Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade900.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red.shade700, width: 1),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.warning, color: Colors.red.shade400, size: 20),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                provider.errorMessage!,
-                                style: TextStyle(color: Colors.red.shade300, fontSize: 13),
-                              ),
+                  Consumer<SensorProvider>(
+                    builder: (context, provider, _) {
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: provider.isLoading ? null : () => provider.fetchLatestData(),
+                        child: Container(
+                          // Optimized fixed dimensions ensure the refresh circle resides comfortably inside the box
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.cyanAccent.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Colors.cyanAccent.withOpacity(0.2),
+                              width: 1,
                             ),
-                          ],
+                          ),
+                          child: Icon(
+                            provider.isLoading ? Icons.sync : Icons.refresh,
+                            color: Colors.cyanAccent,
+                            size: 20,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 24),
+
+              // Error Banner Section
+              Consumer<SensorProvider>(
+                builder: (context, provider, _) {
+                  if (provider.errorMessage != null && provider.errorMessage!.isNotEmpty) {
+                    return Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade900.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade700, width: 1),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.warning, color: Colors.red.shade400, size: 20),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  provider.errorMessage!,
+                                  style: TextStyle(color: Colors.red.shade300, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
+
+              const Text(
+                "ENVIRONMENTAL SENSORS",
+                style: TextStyle(color: Colors.white54, letterSpacing: 2, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+
+              // Sensor Metrics Section
+              Consumer<SensorProvider>(
+                builder: (context, provider, _) {
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: SensorCard(
+                          title: "TEMPERATURE",
+                          value: provider.temperatureDisplay,
+                          unit: "°C",
+                          icon: Icons.thermostat,
+                          glowColor: Colors.orange,
+                          isLoading: provider.isLoading,
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: SensorCard(
+                          title: "HUMIDITY",
+                          value: provider.humidityDisplay,
+                          unit: "%",
+                          icon: Icons.water_drop,
+                          glowColor: Colors.cyanAccent,
+                          isLoading: provider.isLoading,
+                        ),
+                      ),
                     ],
                   );
-                }
-                return const SizedBox.shrink();
-              },
-            ),
+                },
+              ),
 
-            const Text(
-              "ENVIRONMENTAL SENSORS",
-              style: TextStyle(color: Colors.white54, letterSpacing: 2, fontSize: 12),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 32),
+              const Text(
+                "SYSTEM TELEMETRY",
+                style: TextStyle(color: Colors.white54, letterSpacing: 2, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
 
-            // Sensor Metrics Section
-            Consumer<SensorProvider>(
-              builder: (context, provider, _) {
-                return Row(
-                  children: [
-                    Expanded(
-                      child: SensorCard(
-                        title: "TEMPERATURE",
-                        value: provider.temperatureDisplay,
-                        unit: "°C",
-                        icon: Icons.thermostat,
-                        glowColor: Colors.orange,
-                        isLoading: provider.isLoading,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: SensorCard(
-                        title: "HUMIDITY",
-                        value: provider.humidityDisplay,
-                        unit: "%",
-                        icon: Icons.water_drop,
-                        glowColor: Colors.cyanAccent,
-                        isLoading: provider.isLoading,
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-
-            const SizedBox(height: 32),
-            const Text(
-              "SYSTEM TELEMETRY",
-              style: TextStyle(color: Colors.white54, letterSpacing: 2, fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-
-            // System Logs Section
-            Consumer<SensorProvider>(
-              builder: (context, provider, _) {
-                return TelemetryCard(
-                  lastUpdate: provider.getTimeSinceUpdate(),
-                  radarValue: provider.radarDisplay,
-                  isDataFresh: provider.isDataFresh(),
-                );
-              },
-            ),
-            const SizedBox(height: 30),
-          ],
+              // System Logs Section
+              Consumer<SensorProvider>(
+                builder: (context, provider, _) {
+                  return TelemetryCard(
+                    lastUpdate: provider.getTimeSinceUpdate(),
+                    radarValue: provider.radarDisplay,
+                    isDataFresh: provider.isDataFresh(),
+                  );
+                },
+              ),
+              const SizedBox(height: 30),
+            ],
+          ),
         ),
       ),
     );
@@ -230,18 +232,22 @@ class SensorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // FIXED: Cleans the input string to prevent duplicate unit tags (e.g., "0.0°C °C") 
+    // which was pushing the layout card bounds off-screen.
+    final cleanedValue = value.contains(unit) ? value.replaceAll(unit, '').trim() : value;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF111C33), // Darker panel color
+        color: const Color(0xFF22252E), 
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: glowColor.withOpacity(0.3),
+          color: glowColor.withOpacity(0.3), 
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: glowColor.withOpacity(0.1),
+            color: glowColor.withOpacity(0.1), 
             blurRadius: 10,
             spreadRadius: 1,
           ),
@@ -252,14 +258,14 @@ class SensorCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, color: glowColor, size: 20),
+              Icon(icon, color: glowColor, size: 20), 
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   title,
                   style: const TextStyle(
                     color: Colors.white70,
-                    fontSize: 12,
+                    fontSize: 11, // Sized slightly down to guarantee zero layout wrapping
                     letterSpacing: 1,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -281,12 +287,16 @@ class SensorCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
                   children: [
-                    Text(
-                      value,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
+                    // FIXED: Wrapped with Flexible and applied cleanedValue string logic 
+                    // to perfectly maintain screen container integrity across all hardware devices.
+                    Flexible(
+                      child: Text(
+                        cleanedValue,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28, // Balanced size profile
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(width: 4),
@@ -294,7 +304,7 @@ class SensorCard extends StatelessWidget {
                       unit,
                       style: TextStyle(
                         color: glowColor,
-                        fontSize: 16,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -323,7 +333,7 @@ class TelemetryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF111C33),
+        color: const Color(0xFF22252E),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: Colors.cyanAccent.withOpacity(0.1),
@@ -332,7 +342,6 @@ class TelemetryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Radar Status Row
           _buildTelemetryRow(
             icon: Icons.radar,
             label: "RADAR / MOTION",
@@ -347,7 +356,6 @@ class TelemetryCard extends StatelessWidget {
             child: Divider(color: Colors.white10, height: 1),
           ),
           
-          // Last Update Row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -372,11 +380,10 @@ class TelemetryCard extends StatelessWidget {
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 14,
-                      fontFamily: 'Courier', // Gives it a terminal/log feel
+                      fontFamily: 'Courier',
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Freshness Indicator Dot
                   Container(
                     width: 8,
                     height: 8,
@@ -400,7 +407,6 @@ class TelemetryCard extends StatelessWidget {
     );
   }
 
-  // Helper method to keep the code clean
   Widget _buildTelemetryRow({
     required IconData icon, 
     required String label, 

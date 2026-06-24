@@ -15,6 +15,15 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen> {
 
   late Future<Map<String, dynamic>> _dashboardFuture;
 
+  // Sci-fi high-contrast neon palette
+  final List<Color> _sciFiColors = [
+    const Color(0xFF00F0FF), // Neon Cyan
+    const Color(0xFFFF007F), // Cyber Magenta
+    const Color(0xFF00FF66), // Electric Lime
+    const Color(0xFF9D00FF), // Proton Purple
+    const Color(0xFFFF6C00), // Neon Orange
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -44,17 +53,29 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen> {
       return const Center(child: Text('No analytics data available yet.'));
     }
 
-    final total = data.values.fold<int>(0, (sum, item) => sum + item);
-    final sections = data.entries.map((entry) {
+    // Map entries with indexes to loop through the sci-fi color palette cleanly
+    final sections = data.entries.toList().asMap().entries.map((mapEntry) {
+      final index = mapEntry.key;
+      final entry = mapEntry.value;
       final value = entry.value.toDouble();
+      
       return PieChartSectionData(
-        title: '${entry.key} (${entry.value})',
+        color: _sciFiColors[index % _sciFiColors.length],
         value: value,
-        radius: 70,
+        title: '${entry.key}\n(${entry.value})',
+        radius: 30, // Thinner radius for a sleek HUD ring look
         titleStyle: const TextStyle(
           color: Colors.white,
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: FontWeight.bold,
+          letterSpacing: 0.5,
+          shadows: [
+            Shadow(
+              color: Colors.black,
+              offset: Offset(1, 1),
+              blurRadius: 3,
+            ),
+          ],
         ),
       );
     }).toList();
@@ -64,8 +85,8 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen> {
       child: PieChart(
         PieChartData(
           sections: sections,
-          sectionsSpace: 4,
-          centerSpaceRadius: 40,
+          sectionsSpace: 3, // Crisp dividing gap between elements
+          centerSpaceRadius: 55, // Expansion of the center ring for a gauge effect
           borderData: FlBorderData(show: false),
           pieTouchData: PieTouchData(enabled: true),
         ),
