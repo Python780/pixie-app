@@ -42,39 +42,35 @@ class Message {
 
 class ConversationProvider with ChangeNotifier {
   final PixieVoiceTriggerService _triggerService = PixieVoiceTriggerService();
-  final PixieVoiceInteractionService _voiceService =
-      PixieVoiceInteractionService();
+  final PixieVoiceInteractionService _voiceService = PixieVoiceInteractionService();
   final PixieTextToSpeechService _ttsService = PixieTextToSpeechService();
   final GeminiService _geminiService = GeminiService();
   final PixieCameraService _cameraService = PixieCameraService();
   final AnalyticsService _analyticsService = AnalyticsService();
-
   final FirebaseService _dbService = FirebaseService();
+  
   StreamSubscription? _interactionsSub;
 
   double _currentListeningLevel = 0.0;
   String? _listeningPrompt;
   String _geminiApiKey = '';
+  PixieState _state = PixieState.idle;
 
   ConversationProvider() {
     _voiceService.onSoundLevelChange = _updateListeningLevel;
   }
 
-  PixieState _state = PixieState.idle;
-
   PixieState get state => _state;
 
   void _setState(PixieState newState) {
     _state = newState;
+    dev.log("🤖 Pixie State Changed To: $newState");
     notifyListeners();
   }
 
   List<Message> _messages = [];
   bool _isActive = false;
   bool _isProcessing = false;
-
-  // made the mouth animate during Gemini thinking — not during actual speech.
-  // Now _isSpeaking tracks TTS playback separately from Gemini processing.
   bool _isSpeaking = false;
   bool _cameraActive = false;
   bool _listeningForWakeWord = false;
@@ -99,17 +95,15 @@ class ConversationProvider with ChangeNotifier {
 
   Future<void> initialize() async {
     try {
-      dev.log("🚀 Initializing Pixie...");
+      dev.log("🚀 Initializing Pixie Engine...");
       await PixieSpeechService().initialize();
       await _ttsService.initialize();
       await _cameraService.initializeCamera();
       await _geminiService.initialize();
-      // Subscribe to Firestore interactions for this device user and
-      // populate the dashboard chat history (oldest->newest).
+      
+      // Subscribe to Firestore interactions
       try {
-        _interactionsSub = _dbService.getRecentInteractions().listen((
-          snapshot,
-        ) {
+        _interactionsSub = _dbService.getRecentInteractions().listen((snapshot) {
           final List<Message> loaded = [];
           final docs = List.from(snapshot.docs.reversed);
           for (final d in docs) {
@@ -135,9 +129,7 @@ class ConversationProvider with ChangeNotifier {
                 : null;
 
             if (userText.isNotEmpty) {
-              loaded.add(
-                Message(text: userText, isUser: true, timestamp: when),
-              );
+              loaded.add(Message(text: userText, isUser: true, timestamp: when));
             }
             if (pixieText.isNotEmpty) {
               loaded.add(
@@ -161,9 +153,12 @@ class ConversationProvider with ChangeNotifier {
 
       await _loadGeminiApiKey();
       dev.log("✅ Pixie ready!");
-      dev.log("🎤 Microphone always ON - waiting for 'Hi Pixie'...");
+      
+      // Auto-start continuous wake word sensing
+      await startWakeWordDetection();
     } catch (e) {
       dev.log("Initialization error: $e");
+      _setState(PixieState.error);
     }
   }
 
@@ -172,134 +167,123 @@ class ConversationProvider with ChangeNotifier {
     if (_listeningForWakeWord) return;
 
     _listeningForWakeWord = true;
-    _setState(PixieState.wakeListening);
     _listenForWakeWordLoop();
-    notifyListeners();
   }
 
   /// Continuous loop for wake word detection
   void _listenForWakeWordLoop() {
     if (!_listeningForWakeWord) return;
 
-    dev.log("👂 Microphone active - listening for 'Hi Pixie'...");
-    _triggerService
-        .startWakeWordListening(() async {
-          if (_isActive) return;
-          await _startConversation();
-          // Restart wake word safely after conversation ends
-          if (_listeningForWakeWord) {
-            Future.delayed(const Duration(milliseconds: 500), () {
-              _listenForWakeWordLoop();
-            });
-          }
-        })
-        .whenComplete(() {
-          if (_listeningForWakeWord && !_isActive) {
-            dev.log(
-              "🔁 Wake word listener stopped unexpectedly; restarting...",
-            );
-            Future.delayed(const Duration(milliseconds: 500), () {
-              _listenForWakeWordLoop();
-            });
-          }
+    _setState(PixieState.wakeListening);
+    dev.log("👂 Background Engine: Monitoring for 'Hi Pixie'...");
+    
+    _triggerService.startWakeWordListening(() async {
+      if (_isActive) return; // Guard against multi-triggering
+      
+      // Wake word matched! Break loop and escalate to active session.
+      await _startConversation();
+      
+      // After active conversation loop ends completely, fall back into monitoring mode
+      if (_listeningForWakeWord) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          _listenForWakeWordLoop();
         });
+      }
+    }).whenComplete(() {
+      // Loop recovery safety net
+      if (_listeningForWakeWord && !_isActive) {
+        dev.log("🔁 Wake word system cycled or timed out; restarting monitor loop...");
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _listenForWakeWordLoop();
+        });
+      }
+    });
   }
 
   /// Private: Initialize a new conversation with camera ON
   Future<void> _startConversation() async {
     _isActive = true;
-    _cameraActive = true; // camera disabled for testing voice-only first
+    _cameraActive = true; 
     _messages = [];
     _lastInteractionTime = DateTime.now();
     onStatusChanged?.call(true);
-    notifyListeners();
-
-    // BUG FIX: Set _isSpeaking before greeting, clear after
+    
+    // Switch state to speaking for greeting
     _isSpeaking = true;
-    notifyListeners();
+    _setState(PixieState.speaking);
 
-    await _ttsService.speak(
-      "Hi! I'm listening. What would you like to talk about?",
-    );
+    await _ttsService.speak("Hi! I'm listening. What would you like to talk about?");
     await _ttsService.waitForCompletion();
 
     _isSpeaking = false;
-    notifyListeners();
+    _setState(PixieState.idle);
 
-    // Start conversation loop
+    // Enter active conversation exchange
     await _conversationLoop();
   }
 
-  /// Main conversation loop - runs until camera timeout
+  /// Main conversation loop - runs until conversation times out or user leaves
   Future<void> _conversationLoop() async {
     while (_isActive) {
-      // Check for camera inactivity timeout
+      // 1. Check for manual or clock-based camera/inactivity timeout
       if (_cameraActive && _lastInteractionTime != null) {
         final elapsed = DateTime.now().difference(_lastInteractionTime!);
         if (elapsed.inSeconds > _inactivityTimeoutSeconds) {
-          dev.log("⏱️ Camera timeout reached - turning off camera");
-          dev.log(
-            "🎤 Microphone still active, listening for user or 'Hi Pixie'",
-          );
-          _cameraActive = false;
-          onStatusChanged?.call(false);
-          notifyListeners();
-          break;
+          dev.log("⏱️ Inactivity limit reached (${_inactivityTimeoutSeconds}s). Sleeping active session.");
+          break; 
         }
       }
 
-      // Listen for user input
+      // 2. Open active window listening
       _setState(PixieState.userListening);
       _updateListeningPrompt("Listening for your response...");
-      dev.log(
-        "🎤 Waiting for user input${_cameraActive ? ' (📹 camera on)' : ' (📹 camera off)'}...",
-      );
-      String userInput = await _voiceService.listenForInput(
-        maxDurationSeconds: 15,
-      );
+      dev.log("🎤 Capturing prompt payload (📹 camera=${_cameraActive ? 'ON' : 'OFF'})...");
+      
+      String userInput = await _voiceService.listenForInput(maxDurationSeconds: 15);
 
+      // Retry mechanism if first collection was blank
       if (userInput.isEmpty) {
         _updateListeningPrompt("No speech detected. Listening again...");
-        dev.log("⚠️ No speech recognized on first attempt; retrying once...");
+        dev.log("⚠️ Silence encountered. Retrying audio window capture once...");
         userInput = await _voiceService.listenForInput(maxDurationSeconds: 15);
       }
 
+      // 🛠️ FIX: If still empty after a retry, the user has walked away. 
       if (userInput.isEmpty) {
-        continue;
+        dev.log("🛑 No continuous speech input confirmed. Closing active session.");
+        _updateListeningPrompt("Going back to sleep...");
+        
+        // Pause here so the user can actually read the "Going back to sleep..." message.
+        await Future.delayed(const Duration(seconds: 2));
+        break;
       }
 
       _updateListeningPrompt(null);
       _lastInteractionTime = DateTime.now();
 
-      // Add user message
+      // Add user message to UI pipeline
       _messages.add(Message(text: userInput, isUser: true));
       onMessagesUpdated?.call(_messages);
-      dev.log("👤 User: $userInput");
+      dev.log("User Input Text: $userInput");
 
-      // Set processing state (Gemini thinking — mouth stays closed)
+      // 3. Transition to Thinking (Mouth closed, processing animation active)
       _isProcessing = true;
       _setState(PixieState.thinking);
       onStatusChanged?.call(false);
-      notifyListeners();
 
-      // Capture image for context (only if camera is still active)
       XFile? capturedImage;
-
       if (_cameraActive) {
         try {
           capturedImage = await _cameraService.captureFrame();
-
           if (capturedImage != null) {
-            dev.log("📷 Image captured for analysis");
+            dev.log("📷 Frame successfully sent to Gemini payload matrix");
           }
         } catch (e) {
-          dev.log("Camera capture error: $e");
+          dev.log("Camera hardware capture failure: $e");
         }
-      } else {
-        dev.log("📷 Camera is off - voice-only response");
       }
 
-      // Get Gemini response
+      // 4. Run Cloud Inference request via Gemini
       final conversationHistory = _buildConversationHistory();
       final responseMap = await _geminiService.conversationWithGemini(
         userInput: userInput,
@@ -307,42 +291,33 @@ class ConversationProvider with ChangeNotifier {
         conversationHistory: conversationHistory,
       );
 
-      final response =
-          responseMap['response'] ?? "That's interesting! (thoughtful)";
-      final facialAnalysis = responseMap['facial'] ?? "Unable to analyze";
+      final response = responseMap['response'] ?? "I'm processing that. Let's try again.";
+      final facialAnalysis = responseMap['facial'] ?? "Unable to analyze frame context.";
       final faceEmotion = responseMap['faceEmotion'] ?? "neutral";
       final faceConfidence = responseMap['faceConfidence'] ?? "low";
       final bool geminiAvailable = responseMap['geminiAvailable'] != false;
       final String? geminiError = responseMap['error']?.toString();
 
-      // Log analytics locally for every query.
+      // Log Interaction Metrics
       await _analyticsService.logInteraction(
         userQuery: userInput,
         pixieResponse: response,
         emotion: responseMap['emotion']?.toString() ?? 'neutral',
       );
 
-      // Only update availability when the Gemini service explicitly returned
-      // a `geminiAvailable` flag. This keeps the 'unavailable' banner visible
-      // until an explicit success clears it.
       if (responseMap.containsKey('geminiAvailable')) {
         _geminiAvailable = geminiAvailable;
         _geminiErrorMessage = geminiAvailable ? null : geminiError;
       }
 
-      // Extract Pixie's own emotion from her response tag e.g. "(happy)"
       final pixieEmotion = responseMap['emotion'] ?? 'neutral';
-
-      // If Gemini detected user's face with high confidence, let it influence
-      // Pixie's displayed emotion when Pixie has no strong emotion of her own.
-      // e.g. user looks sad → Pixie shows (concerned) face automatically.
       final String? emotionToDisplay = _resolveDisplayEmotion(
         pixieEmotion: pixieEmotion,
         faceEmotion: faceEmotion,
         faceConfidence: faceConfidence,
       );
 
-      // Add Pixie message with facial analysis
+      // Append Response to Dataset
       _messages.add(
         Message(
           text: response,
@@ -352,49 +327,41 @@ class ConversationProvider with ChangeNotifier {
         ),
       );
       onMessagesUpdated?.call(_messages);
-      dev.log("🤖 Pixie: $response");
-      dev.log("👁️ Facial Analysis: $facialAnalysis");
-      dev.log(
-        "😊 Display emotion: $emotionToDisplay (pixie=$pixieEmotion, user=$faceEmotion)",
-      );
 
-      // BUG FIX: Processing ends here; speaking begins separately
-      // This means the mouth only opens when TTS is actually playing
+      // 5. Transition to Speaking (Mouth animation activated via TTS playback)
       _isProcessing = false;
       _isSpeaking = true;
       _setState(PixieState.speaking);
-      notifyListeners();
 
       await _ttsService.speak(response);
       await _ttsService.waitForCompletion();
 
+      // Reset individual sequence back to baseline checking
       _isSpeaking = false;
-      notifyListeners();
       _setState(PixieState.idle);
     }
 
-    // Conversation ended, reset all flags
+    // 6. Loop Terminated. Safely teardown active state and step down to sleep monitor
+    dev.log("💤 Shutting down active loop components...");
     _isActive = false;
     _cameraActive = false;
     _isProcessing = false;
     _isSpeaking = false;
-    notifyListeners();
+    _updateListeningPrompt(null);
+    _setState(PixieState.sleeping);
+    onStatusChanged?.call(false);
   }
 
   /// Decide which emotion the robot face should display.
-  /// Pixie's own emotion tag takes priority. If she's neutral, mirror the
-  /// user's detected face emotion (only when confidence is high).
   String? _resolveDisplayEmotion({
     String? pixieEmotion,
     required String faceEmotion,
     required String faceConfidence,
   }) {
-    // Pixie has a strong emotion — use it
     if (pixieEmotion != null && pixieEmotion != 'neutral') {
       return pixieEmotion;
     }
 
-    // Pixie is neutral — mirror user's face if confident
     if (faceConfidence == 'high') {
       switch (faceEmotion.toLowerCase()) {
         case 'sad':
@@ -414,11 +381,9 @@ class ConversationProvider with ChangeNotifier {
           return pixieEmotion ?? 'neutral';
       }
     }
-
     return pixieEmotion ?? 'neutral';
   }
 
-  /// Build conversation history for context
   String _buildConversationHistory() {
     return _messages
         .map((m) => "${m.isUser ? 'User' : 'Pixie'}: ${m.text}")
@@ -449,30 +414,24 @@ class ConversationProvider with ChangeNotifier {
     }
   }
 
-  /// End the conversation gracefully (camera off, microphone keeps listening)
+  /// End the conversation gracefully (camera off, microphone drops back down to wake detection)
   Future<void> endConversation() async {
     if (!_isActive) return;
-
-    _isActive = false;
-    _cameraActive = false;
-    _isSpeaking = false;
+    _isActive = false; // Breaking out of while() loop flags this instantly
     _updateListeningPrompt(null);
     await _ttsService.stop();
     await _cameraService.disposeCamera();
-
-    dev.log("👋 Conversation ended");
-    dev.log("🎤 Microphone still listening for next 'Hi Pixie'");
-    onStatusChanged?.call(false);
-    notifyListeners();
+    _setState(PixieState.idle);
   }
 
-  /// Complete shutdown (when exiting app)
+  /// Complete structural shutdown (when app lifecycle terminates)
   Future<void> shutdown() async {
     _listeningForWakeWord = false;
     _isActive = false;
     _cameraActive = false;
     _isSpeaking = false;
     _updateListeningPrompt(null);
+    
     try {
       if (_interactionsSub != null) {
         await _interactionsSub!.cancel();
@@ -481,24 +440,20 @@ class ConversationProvider with ChangeNotifier {
     } catch (e) {
       dev.log('Error cancelling interactions subscription: $e');
     }
+    
     await _voiceService.stopListening();
     await _triggerService.stopListening();
     _voiceService.endConversation();
     await _ttsService.stop();
-    dev.log("🛑 Pixie shutdown complete");
-    notifyListeners();
+    _setState(PixieState.idle);
+    dev.log("🛑 Pixie architecture offline.");
   }
 
   // Getters
   List<Message> get messages => _messages;
   bool get isActive => _isActive;
   bool get isProcessing => _isProcessing;
-
-  // BUG FIX: Expose isSpeaking separately so face_screen.dart can wire
-  // isTalking = provider.isSpeaking  (mouth moves only during TTS)
-  // isProcessing = provider.isProcessing  (glow effect during Gemini thinking)
   bool get isSpeaking => _isSpeaking;
-
   bool get isCameraActive => _cameraActive;
   bool get isListeningForWakeWord => _listeningForWakeWord;
   bool get isGeminiAvailable => _geminiAvailable;
