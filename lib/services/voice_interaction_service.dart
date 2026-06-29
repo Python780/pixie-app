@@ -19,18 +19,17 @@ class PixieVoiceInteractionService extends BaseVoiceService {
 
   @override
   Future<void> stopListening() async {
-    if (!isListening) {
-      _currentSoundLevel = 0.0;
-      onSoundLevelChange?.call(normalizedSoundLevel);
-      return;
-    }
+    // FIX 1: Only reset sound level and fire callback if we were actually listening.
+    // Previously this fired onSoundLevelChange even on the early-return path,
+    // causing unexpected UI updates when already stopped.
+    if (!isListening) return;
 
     await super.stopListening();
     _currentSoundLevel = 0.0;
     onSoundLevelChange?.call(normalizedSoundLevel);
   }
 
-  Future<String> listenForInput({int maxDurationSeconds = 10}) async {
+  Future<String> listenForInput({int maxDurationSeconds = 15}) async {
     if (isListening) {
       await stopListening();
       return "";
@@ -46,15 +45,18 @@ class PixieVoiceInteractionService extends BaseVoiceService {
     _maxSoundLevel = 0.0;
     onSoundLevelChange?.call(normalizedSoundLevel);
 
-    // NEW: Timestamps to track when the user *actually* stopped adding new words
-    DateTime lastWordDetectedAt = DateTime.now();
-    
     Timer? timeoutTimer;
+
     try {
+      // Small cooldown to allow native hardware resources to recycle cleanly.
       await Future.delayed(const Duration(milliseconds: 300));
 
+      // FIX 2: Initialize lastWordDetectedAt AFTER the cooldown delay so the
+      // 2-second inactivity clock doesn't start 300ms early.
+      DateTime lastWordDetectedAt = DateTime.now();
+
       isListening = true;
-      dev.log("🎤 Conversation listening START");
+      dev.log("🎤 Conversation listening START (Max: ${maxDurationSeconds}s)");
 
       timeoutTimer = Timer(Duration(seconds: maxDurationSeconds), () {
         if (isListening) {
@@ -66,9 +68,7 @@ class PixieVoiceInteractionService extends BaseVoiceService {
       await stt.listen(
         onResult: (result) async {
           final String newWords = result.recognizedWords.trim();
-          
-          // NEW: If the text changed, update our timestamp. 
-          // This proves the user is actively talking, not just ambient static.
+
           if (newWords != _currentInput.trim() && newWords.isNotEmpty) {
             lastWordDetectedAt = DateTime.now();
           }
@@ -79,13 +79,11 @@ class PixieVoiceInteractionService extends BaseVoiceService {
             " [final=${result.finalResult} confidence=${result.confidence}]",
           );
 
+          // If the native engine says it's done, we MUST close our loop,
+          // regardless of whether the text is empty or valid.
           if (result.finalResult) {
-            final bool loudEnough = _maxSoundLevel >= _minSpeechLevel;
-            final bool confidentEnough = result.confidence > 0.5;
-            if (_currentInput.trim().isNotEmpty && (loudEnough || confidentEnough)) {
-              dev.log("✅ Final result received and accepted");
-              await stopListening();
-            }
+            dev.log("🏁 Native engine finalized session channel.");
+            await stopListening();
           }
         },
         onSoundLevelChange: (level) {
@@ -96,34 +94,51 @@ class PixieVoiceInteractionService extends BaseVoiceService {
         listenMode: ListenMode.dictation,
         partialResults: true,
         cancelOnError: false,
-        // CHANGED: Reduced from 5s to 2s. If the OS detects silence, cut off faster.
-        pauseFor: const Duration(seconds: 2), 
+        pauseFor: const Duration(seconds: 4), // Native silence cutoff threshold
         listenFor: Duration(seconds: maxDurationSeconds),
       );
 
-      // CHANGED: Smarter polling check inside the safety loop
+      // Monitoring Safety Loop
       int loopCounter = 0;
+      // FIX 3: Guard against maxDurationSeconds == 0 producing a zero maxLoops,
+      // which would trigger the force-stop on the very first iteration.
+      final int maxLoops = math.max(1, (maxDurationSeconds * 1000) ~/ 200);
+
       while (isListening) {
         await Future.delayed(const Duration(milliseconds: 200));
         loopCounter++;
 
-        // NEW: Check for text silence. If 1.5 seconds pass without new words 
-        // AND we have captured some input, manually cut it off.
+        // Smart Text Inactivity Timeout (2000ms):
+        // If the user has spoken, wait 2 seconds after their last word before
+        // closing the microphone, so we don't cut them off mid-sentence.
         if (_currentInput.trim().isNotEmpty) {
-          final msSinceLastWord = DateTime.now().difference(lastWordDetectedAt).inMilliseconds;
-          if (msSinceLastWord >= 1500) {
-            dev.log("🤫 Text inactivity detected (${msSinceLastWord}ms). Closing microphone early.");
+          final msSinceLastWord = DateTime.now()
+              .difference(lastWordDetectedAt)
+              .inMilliseconds;
+          if (msSinceLastWord >= 2000) {
+            dev.log(
+              "🤫 2s speech finish gap detected. Closing microphone early.",
+            );
             await stopListening();
             break;
           }
         }
 
-        // Global fallback safety (approx 15 seconds)
-        if (loopCounter > 75) {
+        // Global fallback safety constraint loop.
+        if (loopCounter > maxLoops) {
           dev.log("⚠️ Force stop loop guard triggered");
           await stopListening();
           break;
         }
+      }
+
+      // Strip out low-amplitude junk, background whispers, or accidental static.
+      if (_currentInput.trim().isNotEmpty && _maxSoundLevel < _minSpeechLevel) {
+        dev.log(
+          "🗑️ Discarding payload: Sound levels too faint "
+          "(${_maxSoundLevel.toStringAsFixed(1)} dB)",
+        );
+        return "";
       }
 
       return _currentInput;
@@ -136,9 +151,12 @@ class PixieVoiceInteractionService extends BaseVoiceService {
     }
   }
 
-  void endConversation() {
+  // FIX 4: Made async and awaited stopListening() so sound-level reset and
+  // onSoundLevelChange callback are guaranteed to complete before the caller
+  // continues. Previously fire-and-forget could leave stale UI state.
+  Future<void> endConversation() async {
     _currentInput = "";
-    stopListening();
+    await stopListening();
     dev.log("👋 Conversation ended");
   }
 }
