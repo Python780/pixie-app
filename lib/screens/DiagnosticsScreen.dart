@@ -9,17 +9,9 @@ class DiagnosticsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final robotProvider = context.watch<RobotProvider>();
     final bool connected = robotProvider.isConnected;
-    final int battery = robotProvider.batteryPercent;
     final String operationMode = robotProvider.isAutonomous 
         ? "Autonomous (Auto-Follow)" 
         : "Manual Joystick Drive";
-
-    Color batteryColor = Colors.greenAccent;
-    if (battery <= 20) {
-      batteryColor = Colors.redAccent;
-    } else if (battery <= 50) {
-      batteryColor = Colors.orangeAccent;
-    }
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -88,14 +80,7 @@ class DiagnosticsScreen extends StatelessWidget {
             Icons.memory, 
             connected ? Colors.greenAccent : Colors.redAccent,
           ),
-          _buildHealthTile(
-            "Battery Capacity", 
-            connected ? "$battery%" : "Unknown", 
-            connected 
-                ? (battery <= 20 ? Icons.battery_alert_rounded : Icons.battery_charging_full_rounded)
-                : Icons.battery_unknown_rounded, 
-            connected ? batteryColor : Colors.white24,
-          ),
+          
           _buildHealthTile(
             "Active Control Mode", 
             connected ? operationMode : "Unknown", 

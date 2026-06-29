@@ -97,10 +97,10 @@ class SettingsScreen extends StatelessWidget {
             // ================= SENSOR =================
 
             SettingsCard(
-              icon: Icons.monitor_heart_rounded, // 改用心跳图标，代表健康状态
+              icon: Icons.monitor_heart_rounded,
               iconColor: Colors.orangeAccent,
-              title: "Hardware Diagnostics", // 改名
-              subtitle: "Check connectivity, battery & sensors", // 描述更新
+              title: "Hardware Diagnostics",
+              subtitle: "Check connectivity,sensors", 
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
@@ -146,10 +146,10 @@ class SettingsScreen extends StatelessWidget {
                             children: [
                               TextField(
                                 controller: dialogController,
-                                obscureText: isObscured, // 🌟 状态映射
+                                obscureText: isObscured, 
                                 style: const TextStyle(color: Colors.white),
                                 onChanged: (value) {
-                                  setDialogState(() {}); // 实时捕捉输入以更新检测状态
+                                  setDialogState(() {}); 
                                 },
                                 decoration: InputDecoration(
                                   hintText: "Enter your API key",

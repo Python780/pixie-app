@@ -1,25 +1,32 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as dev;
-import 'package:flutter/material.dart'; // REQUIRED FOR VALUENOTIFIER
+import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 class PixieBluetoothService {
-  static final PixieBluetoothService _instance = PixieBluetoothService._internal();
+  static final PixieBluetoothService _instance =
+      PixieBluetoothService._internal();
+
   factory PixieBluetoothService() => _instance;
   PixieBluetoothService._internal();
 
+  // ✅ UUIDs (MATCH ESP32)
   final Guid serviceUuid = Guid("12345678");
-  final Guid characteristicUuid = Guid("abcd1234");
+  final Guid characteristicUuid = Guid("abcd1234");       // TELEMETRY
+  final Guid controlCharacteristicUuid = Guid("abcd5678"); // COMMAND
 
   BluetoothDevice? currentDevice;
-  BluetoothCharacteristic? targetCharacteristic;
 
-  // Now ValueNotifier will be recognized perfectly
+  BluetoothCharacteristic? telemetryCharacteristic; // READ/NOTIFY
+  BluetoothCharacteristic? controlCharacteristic;   // WRITE
+
   final isConnectedNotifier = ValueNotifier<bool>(false);
   final isScanningNotifier = ValueNotifier<bool>(false);
-  
-  final StreamController<String> _telemetryController = StreamController<String>.broadcast();
+
+  final StreamController<String> _telemetryController =
+      StreamController<String>.broadcast();
+
   Stream<String> get telemetryStream => _telemetryController.stream;
 
   StreamSubscription<BluetoothConnectionState>? _connectionSubscription;
@@ -28,9 +35,11 @@ class PixieBluetoothService {
   bool get isConnected => isConnectedNotifier.value;
   bool get isScanning => isScanningNotifier.value;
 
+  // ✅ SCAN + CONNECT
   Future<bool> scanAndConnect() async {
     try {
       isScanningNotifier.value = true;
+
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
 
       await for (final results in FlutterBluePlus.scanResults) {
@@ -42,67 +51,110 @@ class PixieBluetoothService {
           }
         }
       }
-    } catch (e) { 
-      dev.log("Scan error: $e"); 
+    } catch (e) {
+      dev.log("Scan error: $e");
     }
+
     isScanningNotifier.value = false;
     return false;
   }
 
+  // ✅ CONNECT + DISCOVER SERVICES
   Future<bool> connectToDevice(BluetoothDevice device) async {
     try {
-      await device.connect(autoConnect: false, license: License.free);
+      
+        await device.connect(
+          autoConnect: false,
+          license: License.free,
+        );
+
       currentDevice = device;
 
-      _connectionSubscription = device.connectionState.listen((state) {
-        isConnectedNotifier.value = state == BluetoothConnectionState.connected;
+      _connectionSubscription =
+          device.connectionState.listen((state) {
+        isConnectedNotifier.value =
+            state == BluetoothConnectionState.connected;
       });
 
       final services = await device.discoverServices();
+
       for (final service in services) {
         if (service.uuid == serviceUuid) {
           for (final char in service.characteristics) {
+
+            // ✅ TELEMETRY CHARACTERISTIC
             if (char.uuid == characteristicUuid) {
-              targetCharacteristic = char;
-              isConnectedNotifier.value = true;
+              telemetryCharacteristic = char;
 
               await char.setNotifyValue(true);
-              _valueSubscription = char.onValueReceived.listen((value) {
-                String rawString = utf8.decode(value);
-                _telemetryController.add(rawString);
+
+              _valueSubscription =
+                  char.onValueReceived.listen((value) {
+                try {
+                  String rawString = utf8.decode(value);
+                  _telemetryController.add(rawString);
+                } catch (e) {
+                  dev.log("Decode error: $e");
+                }
               });
 
-              dev.log("BLE Service & Characteristic Ready");
-              return true;
+              dev.log("Telemetry characteristic ready");
+            }
+
+            // ✅ CONTROL CHARACTERISTIC (FIXED)
+            if (char.uuid == controlCharacteristicUuid) {
+              controlCharacteristic = char;
+              dev.log("Control characteristic ready");
             }
           }
         }
       }
-    } catch (e) { 
-      dev.log("Connection failed: $e"); 
+
+      // ✅ Ensure BOTH are ready
+      if (telemetryCharacteristic != null &&
+          controlCharacteristic != null) {
+        isConnectedNotifier.value = true;
+        dev.log("BLE FULLY READY ✅");
+        return true;
+      }
+
+    } catch (e) {
+      dev.log("Connection failed: $e");
     }
+
     return false;
   }
 
+  // ✅ ✅ FIXED: SEND COMMAND TO CORRECT CHARACTERISTIC
   Future<void> sendRawStringCommand(String command) async {
-    if (targetCharacteristic == null) return;
+    if (controlCharacteristic == null) {
+      dev.log("Control characteristic NOT ready");
+      return;
+    }
+
     try {
-      await targetCharacteristic!.write(
-        command.codeUnits, 
+      await controlCharacteristic!.write(
+        command.codeUnits,
         withoutResponse: true,
       );
-    } catch (e) { 
-      dev.log("Failed to send command ($command): $e"); 
+
+      dev.log("Sent command: $command");
+    } catch (e) {
+      dev.log("Failed to send command ($command): $e");
     }
   }
 
+  // ✅ DISCONNECT
   Future<void> disconnect() async {
     try {
       await _valueSubscription?.cancel();
+      await _connectionSubscription?.cancel();
       await currentDevice?.disconnect();
     } catch (_) {}
+
     currentDevice = null;
-    targetCharacteristic = null;
+    telemetryCharacteristic = null;
+    controlCharacteristic = null;
     isConnectedNotifier.value = false;
   }
 

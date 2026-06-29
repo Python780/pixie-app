@@ -27,7 +27,7 @@ class ControllerScreen extends StatelessWidget {
           IconButton(
             icon: Icon(
               robotProvider.isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
-              color: robotProvider.isConnected ? Colors.cyanAccent : Colors.white54,
+              color: robotProvider.isConnected ? Colors.cyanAccent : Colors.cyanAccent,
               size: 28,
             ),
             onPressed: () async {
