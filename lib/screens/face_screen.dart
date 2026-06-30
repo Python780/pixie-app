@@ -139,24 +139,50 @@ class FaceScreenState extends State<FaceScreen> {
             child: showRestartButton
                 ? Padding(
                     key: const ValueKey('restart_btn'),
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: ElevatedButton.icon(
-                      onPressed: () => widget.provider.restartConversation(),
-                      icon: const Icon(Icons.refresh_rounded, size: 20),
-                      label: const Text("Start New Chat"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.cyanAccent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 28, vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        elevation: 4,
-                        textStyle: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
+                    padding: const EdgeInsets.only(bottom: 32.0),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(30),
+                        onTap: () => widget.provider.restartConversation(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.black38,
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(
+                              color: Colors.cyanAccent.withOpacity(0.4),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.cyanAccent.withOpacity(0.1),
+                                blurRadius: 10,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.refresh_rounded,
+                                color: Colors.cyanAccent,
+                                size: 16,
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                "Start New Chat",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
