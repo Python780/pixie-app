@@ -3,7 +3,6 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:camera/camera.dart';
 
 import '../services/voice_trigger_service.dart';
@@ -70,7 +69,7 @@ class ConversationProvider with ChangeNotifier {
 
   void _setState(PixieState newState) {
     _state = newState;
-    dev.log("🤖 Pixie State Changed To: $newState");
+    dev.log("🤖 Pixie State: $newState");
     notifyListeners();
   }
 
@@ -80,12 +79,12 @@ class ConversationProvider with ChangeNotifier {
   bool _isSpeaking = false;
   bool _cameraActive = false;
   bool _listeningForWakeWord = false;
+  bool _hasCompletedAtLeastOneSession = false;
   bool _geminiAvailable = true;
   String? _geminiErrorMessage;
   int _inactivityTimeoutSeconds = 30;
   DateTime? _lastInteractionTime;
 
-  // Callbacks for UI updates
   void Function(List<Message>)? onMessagesUpdated;
   void Function(bool)? onStatusChanged;
 
@@ -111,11 +110,9 @@ class ConversationProvider with ChangeNotifier {
       await _cameraService.initializeCamera();
       await _geminiService.initialize();
 
-      // Subscribe to Firestore interactions
       try {
-        _interactionsSub = _dbService.getRecentInteractions().listen((
-          snapshot,
-        ) {
+        _interactionsSub =
+            _dbService.getRecentInteractions().listen((snapshot) {
           final List<Message> loaded = [];
           final docs = List.from(snapshot.docs.reversed);
           for (final d in docs) {
@@ -142,8 +139,7 @@ class ConversationProvider with ChangeNotifier {
 
             if (userText.isNotEmpty) {
               loaded.add(
-                Message(text: userText, isUser: true, timestamp: when),
-              );
+                  Message(text: userText, isUser: true, timestamp: when));
             }
             if (pixieText.isNotEmpty) {
               loaded.add(
@@ -168,7 +164,6 @@ class ConversationProvider with ChangeNotifier {
       await _loadGeminiApiKey();
       dev.log("✅ Pixie ready!");
 
-      // Auto-start continuous wake word sensing
       await startWakeWordDetection();
     } catch (e) {
       dev.log("Initialization error: $e");
@@ -177,56 +172,60 @@ class ConversationProvider with ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // Wake Word Detection
+  // Wake Word Detection — endless automatic loop
   // ---------------------------------------------------------------------------
 
-  /// Start continuous listening for wake word (microphone always on)
+  /// Begins the endless cycle:
+  ///   wakeListening → conversation → sleep → wakeListening → …
+  ///
+  /// Safe to call multiple times — guards against double-start.
   Future<void> startWakeWordDetection() async {
     if (_listeningForWakeWord) return;
-
     _listeningForWakeWord = true;
     _listenForWakeWordLoop();
   }
 
-  /// Continuous loop for wake word detection
+  /// The core loop. After every conversation ends (by inactivity or silence)
+  /// this method is called again automatically — no button or manual trigger needed.
   void _listenForWakeWordLoop() {
     if (!_listeningForWakeWord) return;
 
     _setState(PixieState.wakeListening);
-    dev.log("👂 Background Engine: Monitoring for 'Hi Pixie'...");
+    dev.log("👂 Monitoring for 'Hi Pixie'...");
 
-    _triggerService
-        .startWakeWordListening(() async {
-          if (_isActive) return; // Guard against multi-triggering
+    _triggerService.startWakeWordListening(() async {
+      if (_isActive) return; // Guard: ignore if already in a session
 
-          // Wake word matched — break loop and escalate to active session.
-          await _startConversation();
+      // Wake word heard → run a full conversation session
+      await _startConversation();
 
-          // After active conversation loop ends completely, fall back into monitoring mode
-          if (_listeningForWakeWord) {
-            Future.delayed(const Duration(milliseconds: 600), () {
-              _listenForWakeWordLoop();
-            });
-          }
-        })
-        .whenComplete(() {
-          // Loop recovery safety net
-          if (_listeningForWakeWord && !_isActive) {
-            dev.log(
-              "🔁 Wake word system cycled or timed out; restarting monitor loop...",
-            );
-            Future.delayed(const Duration(milliseconds: 500), () {
-              _listenForWakeWordLoop();
-            });
-          }
+      // Conversation finished (silence / inactivity) → loop back automatically
+      if (_listeningForWakeWord) {
+        dev.log("🔁 Session ended — back to wake word monitoring.");
+        Future.delayed(const Duration(milliseconds: 200), () {
+          _listenForWakeWordLoop();
         });
+      }
+    }).whenComplete(() {
+      // Safety net: trigger service timed out by itself
+      if (_listeningForWakeWord && !_isActive) {
+        dev.log("🔁 Trigger service cycled — restarting wake word loop.");
+        Future.delayed(const Duration(milliseconds: 200), () {
+          _listenForWakeWordLoop();
+        });
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
   // Conversation Lifecycle
   // ---------------------------------------------------------------------------
 
-  /// Private: Initialize a new conversation with camera ON
+  /// Starts a new conversation session.
+  ///
+  /// Camera is always re-initialised here because [_conversationLoop] calls
+  /// disposeCamera() during teardown — without this the second+ sessions
+  /// would have no vision.
   Future<void> _startConversation() async {
     _isActive = true;
     _cameraActive = true;
@@ -234,118 +233,78 @@ class ConversationProvider with ChangeNotifier {
     _lastInteractionTime = DateTime.now();
     onStatusChanged?.call(true);
 
+    // Re-init camera every session — safe even if already initialised
+    try {
+      await _cameraService.initializeCamera();
+      dev.log("📷 Camera ready.");
+    } catch (e) {
+      dev.log("⚠️ Camera init failed — continuing without vision: $e");
+      _cameraActive = false;
+    }
+
     // Greeting
     _isSpeaking = true;
     _setState(PixieState.speaking);
-
     await _ttsService.speak(
-      "Hi! I'm listening. What would you like to talk about?",
-    );
+        "Hi! I'm listening. What would you like to talk about?");
     await _ttsService.waitForCompletion();
-
     _isSpeaking = false;
     _setState(PixieState.idle);
 
-    // Enter active conversation exchange
     await _conversationLoop();
   }
 
-  /// Public: Manually restart a conversation from the UI.
+  /// Main conversation loop.
   ///
-  /// Safe to call from a button while in [PixieState.sleeping] or
-  /// [PixieState.idle] — bypasses wake word since the user's intent is
-  /// already explicit.
-  Future<void> restartConversation() async {
-    if (_isActive) {
-      dev.log(
-        "⚠️ restartConversation() called while already active — ignoring.",
-      );
-      return;
-    }
-
-    dev.log("🔄 Manual restart triggered — entering new conversation session.");
-
-    // Reset stale state from previous session
-    _messages = [];
-    _geminiErrorMessage = null;
-    _updateListeningPrompt(null);
-    onMessagesUpdated?.call(_messages);
-
-    // Re-initialise camera if it was disposed after sleep
-    if (!_cameraActive) {
-      try {
-        await _cameraService.initializeCamera();
-        dev.log("📷 Camera re-initialised for restarted session.");
-      } catch (e) {
-        dev.log("Camera re-init failed on restart: $e");
-        // Non-fatal — conversation continues without vision
-      }
-    }
-
-    // Start the conversation (greeting + loop)
-    await _startConversation();
-
-    // When the conversation ends naturally, fall back into wake word monitoring
-    if (_listeningForWakeWord) {
-      Future.delayed(const Duration(milliseconds: 600), () {
-        _listenForWakeWordLoop();
-      });
-    }
-  }
-
-  /// Main conversation loop — runs until conversation times out or user leaves
+  /// Exits when:
+  ///   • inactivity timeout is reached, or
+  ///   • two consecutive silent audio windows are detected.
+  ///
+  /// After it returns, [_listenForWakeWordLoop] resumes automatically.
   Future<void> _conversationLoop() async {
     while (_isActive) {
-      // 1. Check for inactivity timeout
-      if (_cameraActive && _lastInteractionTime != null) {
+      // 1. Inactivity timeout
+      if (_lastInteractionTime != null) {
         final elapsed = DateTime.now().difference(_lastInteractionTime!);
         if (elapsed.inSeconds > _inactivityTimeoutSeconds) {
-          dev.log(
-            "⏱️ Inactivity limit reached (${_inactivityTimeoutSeconds}s). Sleeping active session.",
-          );
+          dev.log("⏱️ Inactivity timeout (${_inactivityTimeoutSeconds}s) — "
+              "ending session.");
           break;
         }
       }
 
-      // 2. Open active window listening
+      // 2. Listen for user speech
       _setState(PixieState.userListening);
-      _updateListeningPrompt("Listening for your response...");
+      _updateListeningPrompt("Listening...");
       dev.log(
-        "🎤 Capturing prompt payload (📹 camera=${_cameraActive ? 'ON' : 'OFF'})...",
-      );
+          "🎤 Listening (camera=${_cameraActive ? 'ON' : 'OFF'})...");
 
-      String userInput = await _voiceService.listenForInput(
-        maxDurationSeconds: 15,
-      );
+      String userInput =
+          await _voiceService.listenForInput(maxDurationSeconds: 15);
 
-      // Retry once if first collection was blank
+      // Single retry on silence
       if (userInput.isEmpty) {
         _updateListeningPrompt("No speech detected. Listening again...");
-        dev.log(
-          "⚠️ Silence encountered. Retrying audio window capture once...",
-        );
-        userInput = await _voiceService.listenForInput(maxDurationSeconds: 15);
+        dev.log("⚠️ Silence — retrying once...");
+        userInput =
+            await _voiceService.listenForInput(maxDurationSeconds: 15);
       }
 
-      // Still empty → user has walked away
+      // Still silent → end session, return to wake word loop
       if (userInput.isEmpty) {
-        dev.log(
-          "🛑 No continuous speech input confirmed. Closing active session.",
-        );
+        dev.log("🛑 No speech after retry — ending session.");
         _updateListeningPrompt("Going back to sleep...");
-        await Future.delayed(const Duration(seconds: 2));
         break;
       }
 
       _updateListeningPrompt(null);
       _lastInteractionTime = DateTime.now();
 
-      // Add user message to UI pipeline
       _messages.add(Message(text: userInput, isUser: true));
       onMessagesUpdated?.call(_messages);
-      dev.log("User Input Text: $userInput");
+      dev.log("User: $userInput");
 
-      // 3. Thinking state
+      // 3. Thinking
       _isProcessing = true;
       _setState(PixieState.thinking);
       onStatusChanged?.call(false);
@@ -354,20 +313,17 @@ class ConversationProvider with ChangeNotifier {
       if (_cameraActive) {
         try {
           capturedImage = await _cameraService.captureFrame();
-          if (capturedImage != null) {
-            dev.log("📷 Frame successfully sent to Gemini payload matrix");
-          }
+          if (capturedImage != null) dev.log("📷 Frame captured.");
         } catch (e) {
-          dev.log("Camera hardware capture failure: $e");
+          dev.log("📷 Capture error: $e");
         }
       }
 
-      // 4. Cloud inference via Gemini
-      final conversationHistory = _buildConversationHistory();
+      // 4. Gemini inference
       final responseMap = await _geminiService.conversationWithGemini(
         userInput: userInput,
         imageFile: capturedImage,
-        conversationHistory: conversationHistory,
+        conversationHistory: _buildConversationHistory(),
       );
 
       final response =
@@ -379,7 +335,6 @@ class ConversationProvider with ChangeNotifier {
       final bool geminiAvailable = responseMap['geminiAvailable'] != false;
       final String? geminiError = responseMap['error']?.toString();
 
-      // Log interaction metrics
       await _analyticsService.logInteraction(
         userQuery: userInput,
         pixieResponse: response,
@@ -391,9 +346,8 @@ class ConversationProvider with ChangeNotifier {
         _geminiErrorMessage = geminiAvailable ? null : geminiError;
       }
 
-      final pixieEmotion = responseMap['emotion'] ?? 'neutral';
       final String? emotionToDisplay = _resolveDisplayEmotion(
-        pixieEmotion: pixieEmotion,
+        pixieEmotion: responseMap['emotion']?.toString() ?? 'neutral',
         faceEmotion: faceEmotion,
         faceConfidence: faceConfidence,
       );
@@ -408,34 +362,40 @@ class ConversationProvider with ChangeNotifier {
       );
       onMessagesUpdated?.call(_messages);
 
-      // 5. Speaking state
+      // 5. Speaking
       _isProcessing = false;
       _isSpeaking = true;
       _setState(PixieState.speaking);
-
       await _ttsService.speak(response);
       await _ttsService.waitForCompletion();
-
       _isSpeaking = false;
       _setState(PixieState.idle);
     }
 
-    // 6. Safely teardown active state → sleep
-    dev.log("💤 Shutting down active loop components...");
+    // 6. Session teardown → sleeping
+    dev.log("💤 Tearing down session → sleeping.");
     _isActive = false;
     _cameraActive = false;
     _isProcessing = false;
     _isSpeaking = false;
+    _hasCompletedAtLeastOneSession = true;
     _updateListeningPrompt(null);
+
+    try {
+      await _cameraService.disposeCamera();
+    } catch (e) {
+      dev.log("Camera dispose (non-fatal): $e");
+    }
+
     _setState(PixieState.sleeping);
     onStatusChanged?.call(false);
+    // _listenForWakeWordLoop() resumes automatically from the caller.
   }
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /// Decide which emotion the robot face should display.
   String? _resolveDisplayEmotion({
     String? pixieEmotion,
     required String faceEmotion,
@@ -501,17 +461,52 @@ class ConversationProvider with ChangeNotifier {
   // End / Shutdown
   // ---------------------------------------------------------------------------
 
-  /// End the conversation gracefully (camera off, mic drops back to wake detection)
+  /// Manually restart a conversation — called by the UI restart button.
+  ///
+  /// Bypasses wake word detection since the user's intent is already explicit.
+  /// After the conversation ends naturally the system automatically falls back
+  /// into wake word monitoring as usual.
+  Future<void> restartConversation() async {
+    if (_isActive) {
+      dev.log("⚠️ restartConversation() ignored — session already active.");
+      return;
+    }
+
+    dev.log("🔄 Manual restart — starting new conversation session.");
+
+    // Clear stale state from previous session
+    _messages = [];
+    _geminiErrorMessage = null;
+    _updateListeningPrompt(null);
+    onMessagesUpdated?.call(_messages);
+
+    // Start conversation directly (camera re-init happens inside _startConversation)
+    await _startConversation();
+
+    // When conversation ends, fall back into wake word monitoring as normal
+    if (_listeningForWakeWord) {
+      Future.delayed(const Duration(milliseconds: 600), () {
+        _listenForWakeWordLoop();
+      });
+    }
+  }
+
+  /// Gracefully end the active conversation early.
+  /// The wake word loop will resume automatically.
   Future<void> endConversation() async {
     if (!_isActive) return;
     _isActive = false;
     _updateListeningPrompt(null);
     await _ttsService.stop();
-    await _cameraService.disposeCamera();
+    try {
+      await _cameraService.disposeCamera();
+    } catch (e) {
+      dev.log("Camera dispose on endConversation (non-fatal): $e");
+    }
     _setState(PixieState.idle);
   }
 
-  /// Complete structural shutdown (when app lifecycle terminates)
+  /// Full shutdown — call only when the app is terminating.
   Future<void> shutdown() async {
     _listeningForWakeWord = false;
     _isActive = false;
@@ -520,20 +515,25 @@ class ConversationProvider with ChangeNotifier {
     _updateListeningPrompt(null);
 
     try {
-      if (_interactionsSub != null) {
-        await _interactionsSub!.cancel();
-        _interactionsSub = null;
-      }
+      await _interactionsSub?.cancel();
+      _interactionsSub = null;
     } catch (e) {
-      dev.log('Error cancelling interactions subscription: $e');
+      dev.log('Subscription cancel error: $e');
     }
 
     await _voiceService.stopListening();
     await _triggerService.stopListening();
     _voiceService.endConversation();
     await _ttsService.stop();
+
+    try {
+      await _cameraService.disposeCamera();
+    } catch (e) {
+      dev.log("Camera dispose on shutdown (non-fatal): $e");
+    }
+
     _setState(PixieState.idle);
-    dev.log("🛑 Pixie architecture offline.");
+    dev.log("🛑 Pixie offline.");
   }
 
   // ---------------------------------------------------------------------------
@@ -546,6 +546,7 @@ class ConversationProvider with ChangeNotifier {
   bool get isSpeaking => _isSpeaking;
   bool get isCameraActive => _cameraActive;
   bool get isListeningForWakeWord => _listeningForWakeWord;
+  bool get hasCompletedAtLeastOneSession => _hasCompletedAtLeastOneSession;
   bool get isGeminiAvailable => _geminiAvailable;
   String? get geminiErrorMessage => _geminiErrorMessage;
   String get geminiApiKey => _geminiApiKey;
@@ -557,105 +558,5 @@ class ConversationProvider with ChangeNotifier {
   set inactivityTimeoutSeconds(int seconds) {
     _inactivityTimeoutSeconds = seconds;
     notifyListeners();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// PixieRestartButton — drop this anywhere in your widget tree
-// ---------------------------------------------------------------------------
-
-/// A self-contained restart button that reads from [ConversationProvider]
-/// and shows itself only when Pixie is sleeping or idle (and not mid-session).
-///
-/// Usage:
-///   PixieRestartButton()          // default appearance
-///   PixieRestartButton(           // customised
-///     label: 'Wake Pixie',
-///     icon: Icons.mic_rounded,
-///     primaryColor: Colors.deepPurple,
-///   )
-class PixieRestartButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color? primaryColor;
-
-  const PixieRestartButton({
-    super.key,
-    this.label = 'Start New Chat',
-    this.icon = Icons.refresh_rounded,
-    this.primaryColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<ConversationProvider>(
-      builder: (context, provider, _) {
-        final bool showButton =
-            !provider.isActive &&
-            (provider.state == PixieState.sleeping ||
-                provider.state == PixieState.idle);
-
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          switchInCurve: Curves.easeOut,
-          switchOutCurve: Curves.easeIn,
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(scale: animation, child: child),
-          ),
-          child: showButton
-              ? _RestartButtonBody(
-                  key: const ValueKey('restart_visible'),
-                  label: label,
-                  icon: icon,
-                  primaryColor:
-                      primaryColor ?? Theme.of(context).colorScheme.primary,
-                  onTap: () => provider.restartConversation(),
-                )
-              : const SizedBox.shrink(key: ValueKey('restart_hidden')),
-        );
-      },
-    );
-  }
-}
-
-class _RestartButtonBody extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color primaryColor;
-  final VoidCallback onTap;
-
-  const _RestartButtonBody({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.primaryColor,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0),
-      child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: 20),
-        label: Text(label),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: primaryColor,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
-          ),
-          elevation: 3,
-          textStyle: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ),
-    );
   }
 }

@@ -63,8 +63,10 @@ class FaceScreenState extends State<FaceScreen> {
 
     final bool isCurrentlyTalking = widget.provider.isSpeaking;
 
-    // Derive whether the restart button should be visible
+    // Show restart button only after at least one conversation has
+    // completed — never during the very first wake word detection cycle.
     final bool showRestartButton = !widget.provider.isActive &&
+        widget.provider.hasCompletedAtLeastOneSession &&
         (widget.provider.state == PixieState.sleeping ||
             widget.provider.state == PixieState.idle ||
             widget.provider.state == PixieState.wakeListening);
@@ -134,7 +136,7 @@ class FaceScreenState extends State<FaceScreen> {
               opacity: animation,
               child: ScaleTransition(scale: animation, child: child),
             ),
-            child: showRestartButton && _chatMessages.isNotEmpty
+            child: showRestartButton
                 ? Padding(
                     key: const ValueKey('restart_btn'),
                     padding: const EdgeInsets.only(bottom: 12.0),
