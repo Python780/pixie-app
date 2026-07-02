@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main  # This fires the build every time you push to the main branch
+      - pixie_app_voice
+  workflow_dispatch:
 
 jobs:
   build:
