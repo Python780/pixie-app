@@ -184,6 +184,7 @@ class GeminiService {
       // Build system prompt with conversation context
       final systemPrompt =
             """You are Pixie, a friendly and helpful robot assistant.
+            $languageConstraint
 
 Answer the user with a complete, conversational reply. Avoid short status messages like "Getting weather info...".
 If the user asks for weather but doesn't specify a location, politely ask them where they'd like to know the weather for.
