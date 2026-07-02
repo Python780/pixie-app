@@ -22,6 +22,10 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    androidResources {
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.pixie"

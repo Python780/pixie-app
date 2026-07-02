@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../providers/conversation_provider.dart';
 import '../screens/analytics_dashboard.dart';
 import '../widgets/robot_face/dashboard.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:developer' as dev;
 
 class FaceScreen extends StatefulWidget {
   final ConversationProvider provider;
@@ -23,6 +25,17 @@ class FaceScreenState extends State<FaceScreen> {
   }
 
   Future<void> _initPixieSystem() async {
+    var micStatus = await Permission.microphone.status;
+    if (!micStatus.isGranted) {
+      micStatus = await Permission.microphone.request();
+    }
+
+    if (!micStatus.isGranted) {
+      dev.log("Microphone permission denied or permanently blocked ❌");
+      setState(() => _isLoading = false);
+      return; // Stop here if they decline
+    }
+
     await widget.provider.initialize();
 
     widget.provider.onMessagesUpdated = (messages) {

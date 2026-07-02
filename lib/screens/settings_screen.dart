@@ -277,26 +277,6 @@ class SettingsScreen extends StatelessWidget {
               },
             ),
 
-            // ================= DATA =================
-
-            const SectionTitle(
-              title: "DATA",
-            ),
-
-            const SizedBox(height: 16),
-
-            SettingsCard(
-              icon: Icons.cloud_sync_rounded,
-              iconColor: Colors.amberAccent,
-              title: "Firebase Sync",
-              subtitle:
-                  "Refresh robot conversation data",
-
-              onTap: () {},
-            ),
-
-            const SizedBox(height: 35),
-
             // ================= ABOUT CARD =================
 
             Container(
