@@ -62,6 +62,9 @@ dependencies:
   provider: ^6.1.5+1
   flutter_blue_plus: ^2.3.8
 
+  #voice
+  audioplayers: ^6.0.0
+
   # flutter_local_notifications: ^19.5.0
 
 dev_dependencies:

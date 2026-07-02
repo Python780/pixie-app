@@ -222,13 +222,60 @@ class SettingsScreen extends StatelessWidget {
               icon: Icons.mic_rounded,
               iconColor: Colors.cyanAccent,
               title: "Voice System",
-              subtitle:
-                  "Wake word and speech settings",
+              subtitle: "Selected: ${Provider.of<ConversationProvider>(context).selectedVoice.toUpperCase()}",
 
-              onTap: () {},
+              onTap: () {
+                final provider = Provider.of<ConversationProvider>(context, listen: false);
+                final List<Map<String, String>> voiceOptions = [
+                  {'name': 'Sarah (American English)', 'id': 'Sarah (American English)'},
+                  {'name': 'Glinda (British English)', 'id': 'glinda'},
+                  {'name': 'Keanu Reeves (Deadpan English)', 'id': 'keanu reeves'},
+                  {'name': 'Yuta (Japanese)', 'id': 'yuta'},
+                  {'name': 'Misa (Japanese)', 'id': 'misa'},
+                  {'name': 'Sponge Bob (Cartoon)', 'id': 'sponge bob'},
+                ];
+
+                showDialog(
+                  context: context,
+                  builder: (context) {
+                    return AlertDialog(
+                      backgroundColor: const Color(0xFF222222),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      title: const Text("Select AI Voice", style: TextStyle(color: Colors.white)),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: voiceOptions.map((voice) {
+                          final isSelected = provider.selectedVoice == voice['id'];
+                          return ListTile(
+                            leading: Icon(
+                              Icons.spatial_audio_off_rounded,
+                              color: isSelected ? Colors.cyanAccent : Colors.white54,
+                            ),
+                            title: Text(
+                              voice['name']!,
+                              style: TextStyle(
+                                color: isSelected ? Colors.cyanAccent : Colors.white,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: isSelected 
+                                ? const Icon(Icons.check_circle, color: Colors.cyanAccent) 
+                                : null,
+                            onTap: () {
+                              provider.updateSelectedVoice(voice['id']!);
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text("Voice changed to ${voice['name']}!")),
+                              );
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    );
+                  },
+                );
+              },
             ),
-
-            const SizedBox(height: 30),
 
             // ================= DATA =================
 

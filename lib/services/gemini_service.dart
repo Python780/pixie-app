@@ -146,6 +146,7 @@ class GeminiService {
   /// Returns a map with 'response' and 'facial' keys
   Future<Map<String, dynamic>> conversationWithGemini({
     required String userInput,
+    required String selectedVoice,
     XFile? imageFile,
     String? conversationHistory,
   }) async {
@@ -167,11 +168,24 @@ class GeminiService {
     }
     try {
       final parts = <Part>[];
+      String languageConstraint = '';
+      switch (selectedVoice) {
+        case 'dualipa':
+          languageConstraint = 'CRITICAL: The user is listening using a Dua Lipa voice clone. You MUST reply strictly in confident British English with a modern pop-star persona.';
+          break;
+        case 'keanu':
+          languageConstraint = 'CRITICAL: The user is listening using a Keanu Reeves voice clone. You MUST reply strictly in calm, short, humble American English (John Wick style).';
+          break;
+        case 'naruto':
+          languageConstraint = 'CRITICAL: The user is using a Naruto voice clone. Reply with high energy, anime tropes, and throw in Japanese exclamation catchphrases like "Dattebayo!".';
+          break;
+      }
 
       // Build system prompt with conversation context
       final systemPrompt = '''
-      You are now my accompanying robot assistant [insert name here, e.g., TARS]. You must adhere to both the following [Style Parameters] and [Visual Analysis Rules] when processing my inputs.
-
+      You are now my accompanying robot assistant [pixie]. You must adhere to both the following [Style Parameters] and [Visual Analysis Rules] when processing my inputs.
+      $languageConstraint
+      
       =========================================
       1. Style Parameter Settings (Adjustable by percentage at any time)
       =========================================

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:pixie/providers/conversation_provider.dart';
 import 'package:pixie/providers/robot_provider.dart';
@@ -18,13 +19,45 @@ void main() async {
   // Ensure Flutter engine services are completely ready
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Core Fix: Load .env synchronously before ANYTHING else initializes
+  // 1. Core Fix: Load .env before ANYTHING else initializes
   try {
-    await dotenv.load(fileName: ".env");
-    print('✅ Loaded credentials from root .env successfully');
+    // Try loading from asset bundle first (works for both development and APK builds)
+    try {
+      final envFile = await rootBundle.loadString('.env');
+      print('📄 Raw .env content from asset bundle: $envFile');
+      
+      // Parse the env file content manually into dotenv.env
+      final lines = envFile.split('\n');
+      for (final line in lines) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+        
+        final equalsIndex = trimmed.indexOf('=');
+        if (equalsIndex > 0) {
+          final key = trimmed.substring(0, equalsIndex).trim();
+          var value = trimmed.substring(equalsIndex + 1).trim();
+          
+          // Remove quotes if present
+          if ((value.startsWith('"') && value.endsWith('"')) ||
+              (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length - 1);
+          }
+          
+          dotenv.env[key] = value;
+          print('✅ Loaded: $key = ${value.substring(0, (value.length > 10 ? 10 : value.length))}...');
+        }
+      }
+      print('✅ Loaded credentials from asset bundle .env successfully');
+    } catch (e) {
+      // Fallback to file system loading for development
+      print('⚠️ Asset bundle load failed, trying file system: $e');
+      await dotenv.load(fileName: ".env");
+      print('✅ Loaded credentials from file system .env successfully');
+    }
     print('🔍 Available Keys: ${dotenv.env.keys.toList()}');
+    print('🔍 FISH_AUDIO_API_KEY value: ${dotenv.env['FISH_AUDIO_API_KEY']}');
   } catch (e) {
-    print('❌ Critical Error: Could not load root .env file: $e');
+    print('❌ Critical Error: Could not load .env file: $e');
   }
 
   // 2. Initialize Firebase infrastructure
