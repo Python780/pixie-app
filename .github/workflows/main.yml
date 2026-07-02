@@ -4,7 +4,8 @@ on:
   push:
     branches:
       - main  # This fires the build every time you push to the main branch
-
+      - pixie_app_voice
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,6 +34,7 @@ jobs:
           echo "THINGSPEAK_CHANNEL_ID=${{ secrets.THINGSPEAK_CHANNEL_ID }}" >> .env
           echo "THINGSPEAK_API_KEY=${{ secrets.THINGSPEAK_API_KEY }}" >> .env
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          echo "FISH_AUDIO_API_KEY=${{ secrets.FISH_AUDIO_API_KEY }}" >> .env
 
       # 5. Fetch dependencies and compile the APK
       - name: Install dependencies
