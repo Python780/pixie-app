@@ -19,18 +19,14 @@ class PixieVoiceInteractionService extends BaseVoiceService {
 
   @override
   Future<void> stopListening() async {
-    if (!isListening) {
-      _currentSoundLevel = 0.0;
-      onSoundLevelChange?.call(normalizedSoundLevel);
-      return;
-    }
+    if (!isListening) return;
 
     await super.stopListening();
     _currentSoundLevel = 0.0;
     onSoundLevelChange?.call(normalizedSoundLevel);
   }
 
-  Future<String> listenForInput({int maxDurationSeconds = 10}) async {
+  Future<String> listenForInput({int maxDurationSeconds = 15}) async {
     if (isListening) {
       await stopListening();
       return "";
@@ -46,15 +42,18 @@ class PixieVoiceInteractionService extends BaseVoiceService {
     _maxSoundLevel = 0.0;
     onSoundLevelChange?.call(normalizedSoundLevel);
 
-    // NEW: Timestamps to track when the user *actually* stopped adding new words
-    DateTime lastWordDetectedAt = DateTime.now();
-    
     Timer? timeoutTimer;
+
     try {
-      await Future.delayed(const Duration(milliseconds: 300));
+      // Reduced cooldown: 300ms -> 80ms. Speech_to_text on most modern
+      // devices handles back-to-back listen() calls fine with a minimal gap;
+      // the longer delay was adding cumulative latency every single turn.
+      await Future.delayed(const Duration(milliseconds: 80));
+
+      DateTime lastWordDetectedAt = DateTime.now();
 
       isListening = true;
-      dev.log("🎤 Conversation listening START");
+      dev.log("🎤 Conversation listening START (Max: ${maxDurationSeconds}s)");
 
       timeoutTimer = Timer(Duration(seconds: maxDurationSeconds), () {
         if (isListening) {
@@ -66,9 +65,7 @@ class PixieVoiceInteractionService extends BaseVoiceService {
       await stt.listen(
         onResult: (result) async {
           final String newWords = result.recognizedWords.trim();
-          
-          // NEW: If the text changed, update our timestamp. 
-          // This proves the user is actively talking, not just ambient static.
+
           if (newWords != _currentInput.trim() && newWords.isNotEmpty) {
             lastWordDetectedAt = DateTime.now();
           }
@@ -80,12 +77,8 @@ class PixieVoiceInteractionService extends BaseVoiceService {
           );
 
           if (result.finalResult) {
-            final bool loudEnough = _maxSoundLevel >= _minSpeechLevel;
-            final bool confidentEnough = result.confidence > 0.5;
-            if (_currentInput.trim().isNotEmpty && (loudEnough || confidentEnough)) {
-              dev.log("✅ Final result received and accepted");
-              await stopListening();
-            }
+            dev.log("🏁 Native engine finalized session channel.");
+            await stopListening();
           }
         },
         onSoundLevelChange: (level) {
@@ -96,34 +89,49 @@ class PixieVoiceInteractionService extends BaseVoiceService {
         listenMode: ListenMode.dictation,
         partialResults: true,
         cancelOnError: false,
-        // CHANGED: Reduced from 5s to 2s. If the OS detects silence, cut off faster.
-        pauseFor: const Duration(seconds: 2), 
+        pauseFor: const Duration(seconds: 4),
         listenFor: Duration(seconds: maxDurationSeconds),
       );
 
-      // CHANGED: Smarter polling check inside the safety loop
+      // Monitoring Safety Loop
       int loopCounter = 0;
+      final int maxLoops = math.max(1, (maxDurationSeconds * 1000) ~/ 150);
+
       while (isListening) {
-        await Future.delayed(const Duration(milliseconds: 200));
+        // Tighter poll interval: 200ms -> 150ms for quicker reaction to
+        // both the inactivity gap and the loop guard.
+        await Future.delayed(const Duration(milliseconds: 150));
         loopCounter++;
 
-        // NEW: Check for text silence. If 1.5 seconds pass without new words 
-        // AND we have captured some input, manually cut it off.
+        // Reduced inactivity gap: 2000ms -> 1200ms. Still long enough to
+        // avoid cutting someone off mid-sentence, but noticeably snappier
+        // for the common case of short, complete answers.
         if (_currentInput.trim().isNotEmpty) {
-          final msSinceLastWord = DateTime.now().difference(lastWordDetectedAt).inMilliseconds;
-          if (msSinceLastWord >= 1500) {
-            dev.log("🤫 Text inactivity detected (${msSinceLastWord}ms). Closing microphone early.");
+          final msSinceLastWord = DateTime.now()
+              .difference(lastWordDetectedAt)
+              .inMilliseconds;
+          if (msSinceLastWord >= 1200) {
+            dev.log(
+              "🤫 Speech finish gap detected. Closing microphone early.",
+            );
             await stopListening();
             break;
           }
         }
 
-        // Global fallback safety (approx 15 seconds)
-        if (loopCounter > 75) {
+        if (loopCounter > maxLoops) {
           dev.log("⚠️ Force stop loop guard triggered");
           await stopListening();
           break;
         }
+      }
+
+      if (_currentInput.trim().isNotEmpty && _maxSoundLevel < _minSpeechLevel) {
+        dev.log(
+          "🗑️ Discarding payload: Sound levels too faint "
+          "(${_maxSoundLevel.toStringAsFixed(1)} dB)",
+        );
+        return "";
       }
 
       return _currentInput;
@@ -136,9 +144,9 @@ class PixieVoiceInteractionService extends BaseVoiceService {
     }
   }
 
-  void endConversation() {
+  Future<void> endConversation() async {
     _currentInput = "";
-    stopListening();
+    await stopListening();
     dev.log("👋 Conversation ended");
   }
 }

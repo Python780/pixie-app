@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import '../providers/conversation_provider.dart';
 import '../screens/analytics_dashboard.dart';
-import '../widgets/robot_face/dashboard.dart'; 
+import '../widgets/robot_face/dashboard.dart';
 
 class FaceScreen extends StatefulWidget {
   final ConversationProvider provider;
@@ -32,7 +32,6 @@ class FaceScreenState extends State<FaceScreen> {
     };
 
     widget.provider.addListener(_providerListener);
-
     widget.provider.startWakeWordDetection();
     setState(() => _isLoading = false);
   }
@@ -53,7 +52,7 @@ class FaceScreenState extends State<FaceScreen> {
       );
     }
 
-    String currentEmotion = 'neutral'; 
+    String currentEmotion = 'neutral';
     if (_chatMessages.isNotEmpty) {
       final lastBotMsg = _chatMessages.lastWhere(
         (m) => !m.isUser,
@@ -63,6 +62,14 @@ class FaceScreenState extends State<FaceScreen> {
     }
 
     final bool isCurrentlyTalking = widget.provider.isSpeaking;
+
+    // Show restart button only after at least one conversation has
+    // completed — never during the very first wake word detection cycle.
+    final bool showRestartButton = !widget.provider.isActive &&
+        widget.provider.hasCompletedAtLeastOneSession &&
+        (widget.provider.state == PixieState.sleeping ||
+            widget.provider.state == PixieState.idle ||
+            widget.provider.state == PixieState.wakeListening);
 
     return Scaffold(
       backgroundColor: const Color(0xFF222222),
@@ -95,22 +102,23 @@ class FaceScreenState extends State<FaceScreen> {
       ),
       body: Column(
         children: [
-          // ================= TOP BLOCK: ROBOT FACE PANEL LAYER =================
+          // ================= TOP BLOCK: ROBOT FACE PANEL =================
           Expanded(
             child: Container(
-              color: const Color(0xFF222222), 
+              color: const Color(0xFF222222),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final double adaptiveFaceSize = constraints.maxHeight * 0.32;
 
                   return Center(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24.0, vertical: 12.0),
                       child: DashboardWidget(
                         emotion: currentEmotion,
                         isTalking: isCurrentlyTalking,
                         isProcessing: widget.provider.isProcessing,
-                        baseSize: adaptiveFaceSize, 
+                        baseSize: adaptiveFaceSize,
                       ),
                     ),
                   );
@@ -118,22 +126,88 @@ class FaceScreenState extends State<FaceScreen> {
               ),
             ),
           ),
-                
+
+          // ================= RESTART BUTTON: SHOWN AFTER SLEEP =================
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 350),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(scale: animation, child: child),
+            ),
+            child: showRestartButton
+                ? Padding(
+                    key: const ValueKey('restart_btn'),
+                    padding: const EdgeInsets.only(bottom: 32.0),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(30),
+                        onTap: () => widget.provider.restartConversation(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.black38,
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(
+                              color: Colors.cyanAccent.withOpacity(0.4),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.cyanAccent.withOpacity(0.1),
+                                blurRadius: 10,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.refresh_rounded,
+                                color: Colors.cyanAccent,
+                                size: 16,
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                "Start New Chat",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('restart_hidden')),
+          ),
+
           // ================= HINT BUBBLE: SHOWN ONLY WHEN NO CONVERSATION YET =================
           if (_chatMessages.isEmpty)
             Padding(
-              padding: const EdgeInsets.only(bottom: 32.0, left: 32.0, right: 32.0),
+              padding: const EdgeInsets.only(
+                  bottom: 32.0, left: 32.0, right: 32.0),
               child: AnimatedOpacity(
-                opacity: widget.provider.isListeningForWakeWord ? 1.0 : 0.6,
+                opacity:
+                    widget.provider.isListeningForWakeWord ? 1.0 : 0.6,
                 duration: const Duration(milliseconds: 500),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 12),
                   decoration: BoxDecoration(
                     color: Colors.black38,
                     borderRadius: BorderRadius.circular(30),
                     border: Border.all(
-                      color: widget.provider.isListeningForWakeWord 
-                          ? Colors.greenAccent.withOpacity(0.4) 
+                      color: widget.provider.isListeningForWakeWord
+                          ? Colors.greenAccent.withOpacity(0.4)
                           : Colors.grey.withOpacity(0.3),
                       width: 1.5,
                     ),
@@ -150,8 +224,12 @@ class FaceScreenState extends State<FaceScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        widget.provider.isListeningForWakeWord ? Icons.waves : Icons.sync_disabled,
-                        color: widget.provider.isListeningForWakeWord ? Colors.greenAccent : Colors.grey,
+                        widget.provider.isListeningForWakeWord
+                            ? Icons.waves
+                            : Icons.sync_disabled,
+                        color: widget.provider.isListeningForWakeWord
+                            ? Colors.greenAccent
+                            : Colors.grey,
                         size: 16,
                       ),
                       const SizedBox(width: 10),
@@ -160,7 +238,9 @@ class FaceScreenState extends State<FaceScreen> {
                             ? "Say 'Hi Pixie' to wake me up!"
                             : "Connecting sensors...",
                         style: TextStyle(
-                          color: widget.provider.isListeningForWakeWord ? Colors.white : Colors.grey[400],
+                          color: widget.provider.isListeningForWakeWord
+                              ? Colors.white
+                              : Colors.grey[400],
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
                           letterSpacing: 0.5,
@@ -172,17 +252,20 @@ class FaceScreenState extends State<FaceScreen> {
               ),
             ),
 
-          // ================= MIDDLE BLOCK: REFINED USER LISTENING BAR =================
+          // ================= LISTENING BAR =================
           if (widget.provider.state == PixieState.userListening)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 4.0), 
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 24.0, vertical: 4.0),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0), 
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14.0, vertical: 10.0),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.06),
-                  borderRadius: BorderRadius.circular(16.0), 
-                  border: Border.all(color: Colors.cyanAccent.withOpacity(0.6)),
+                  borderRadius: BorderRadius.circular(16.0),
+                  border: Border.all(
+                      color: Colors.cyanAccent.withOpacity(0.6)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,21 +273,26 @@ class FaceScreenState extends State<FaceScreen> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.mic, color: Colors.cyanAccent, size: 18), 
+                        const Icon(Icons.mic,
+                            color: Colors.cyanAccent, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            widget.provider.listeningPrompt ?? 'Listening...',
+                            widget.provider.listeningPrompt ??
+                                'Listening...',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 12, 
+                              fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
                         Text(
                           '${(widget.provider.listeningLevel * 100).round()}%',
-                          style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              color: Colors.cyanAccent,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -213,7 +301,7 @@ class FaceScreenState extends State<FaceScreen> {
                       borderRadius: BorderRadius.circular(8.0),
                       child: LinearProgressIndicator(
                         value: widget.provider.listeningLevel,
-                        minHeight: 5, 
+                        minHeight: 5,
                         backgroundColor: Colors.white10,
                         color: Colors.cyanAccent,
                       ),
@@ -223,8 +311,8 @@ class FaceScreenState extends State<FaceScreen> {
               ),
             ),
 
-          // ================= BOTTOM BLOCK: ACTIVE CONVERSATION FEED =================
-          if (_chatMessages.isNotEmpty) 
+          // ================= BOTTOM BLOCK: CONVERSATION FEED =================
+          if (_chatMessages.isNotEmpty)
             Expanded(
               flex: 1,
               child: Container(
@@ -247,11 +335,13 @@ class FaceScreenState extends State<FaceScreen> {
               ),
             ),
 
+          // ================= GEMINI ERROR BANNER =================
           if (!widget.provider.isGeminiAvailable)
             Container(
               width: double.infinity,
               color: Colors.redAccent,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 10),
               child: Text(
                 widget.provider.geminiErrorMessage != null
                     ? 'Gemini unavailable: ${widget.provider.geminiErrorMessage}'
@@ -266,14 +356,15 @@ class FaceScreenState extends State<FaceScreen> {
         ],
       ),
     );
-  } 
+  }
 
   Widget _buildChatBubble(Message msg) {
     return Align(
       alignment: msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: msg.isUser ? Colors.cyan[700] : Colors.grey[800],
           borderRadius: BorderRadius.circular(20).copyWith(
@@ -291,7 +382,8 @@ class FaceScreenState extends State<FaceScreen> {
           children: [
             Text(
               msg.text,
-              style: const TextStyle(color: Colors.white, fontSize: 15),
+              style:
+                  const TextStyle(color: Colors.white, fontSize: 15),
             ),
             if (!msg.isUser && msg.facialAnalysis != null)
               Padding(
