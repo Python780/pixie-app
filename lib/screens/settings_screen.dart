@@ -228,8 +228,9 @@ class SettingsScreen extends StatelessWidget {
                 final provider = Provider.of<ConversationProvider>(context, listen: false);
                 final List<Map<String, String>> voiceOptions = [
                   {'name': 'Sarah (American English)', 'id': 'Sarah (American English)'},
-                  {'name': 'Glinda (British English)', 'id': 'glinda'},
-                  {'name': 'Keanu Reeves (Deadpan English)', 'id': 'keanu reeves'},
+                  {'name': 'Ethan (Male)', 'id': 'ethan'},
+                  {'name': 'Glinda ', 'id': 'glinda'},
+                  {'name': 'Keanu Reeves ', 'id': 'keanu reeves'},
                   {'name': 'Yuta (Japanese)', 'id': 'yuta'},
                   {'name': 'Misa (Japanese)', 'id': 'misa'},
                   {'name': 'Sponge Bob (Cartoon)', 'id': 'sponge bob'},
@@ -277,6 +278,7 @@ class SettingsScreen extends StatelessWidget {
               },
             ),
 
+            const SizedBox(height: 30),
             // ================= ABOUT CARD =================
 
             Container(

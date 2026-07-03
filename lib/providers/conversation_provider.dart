@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/voice_trigger_service.dart';
 import '../services/voice_interaction_service.dart';
@@ -63,6 +64,7 @@ class ConversationProvider with ChangeNotifier {
 
   // New Voice Cloning State
   String _selectedVoice = 'Sarah (American English)'; // Default voice
+  static const String _voicePreferenceKey = 'pixie_selected_voice';
 
   ConversationProvider() {
     _voiceService.onSoundLevelChange = _updateListeningLevel;
@@ -78,9 +80,31 @@ class ConversationProvider with ChangeNotifier {
   }
 
   /// Updates the active voice character and alerts UI listeners
-  void updateSelectedVoice(String newVoiceId) {
+  Future<void> updateSelectedVoice(String newVoiceId) async {
     _selectedVoice = newVoiceId;
+    // Persist voice preference to local storage
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_voicePreferenceKey, newVoiceId);
+      dev.log('✅ Voice preference saved: $newVoiceId');
+    } catch (e) {
+      dev.log('⚠️ Failed to save voice preference: $e');
+    }
     notifyListeners();
+  }
+
+  /// Loads saved voice preference from persistent storage
+  Future<void> _loadVoicePreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedVoice = prefs.getString(_voicePreferenceKey);
+      if (savedVoice != null && savedVoice.isNotEmpty) {
+        _selectedVoice = savedVoice;
+        dev.log('✅ Voice preference loaded: $savedVoice');
+      }
+    } catch (e) {
+      dev.log('⚠️ Failed to load voice preference: $e');
+    }
   }
 
   List<Message> _messages = [];
@@ -115,6 +139,7 @@ class ConversationProvider with ChangeNotifier {
   Future<void> initialize() async {
     try {
       dev.log("🚀 Initializing Pixie Engine...");
+      await _loadVoicePreference(); // Load saved voice first
       await PixieSpeechService().initialize();
       await _ttsService.initialize();
       await _cameraService.initializeCamera();

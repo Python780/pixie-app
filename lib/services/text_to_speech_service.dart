@@ -12,7 +12,7 @@ class PixieTextToSpeechService {
   final FlutterTts _tts = FlutterTts();
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isSpeaking = false;
-  
+
   // Store API key once it's loaded
   late String _cachedApiKey;
 
@@ -35,7 +35,7 @@ class PixieTextToSpeechService {
     "password", "secret key", "credit card", "identity card", "pin number",
     "身份证", "银行卡", "密码"
   ];
-  
+
   PixieTextToSpeechService() {
     _cachedApiKey = '';
   }
@@ -46,13 +46,13 @@ class PixieTextToSpeechService {
       print('🔍 DEBUG TTS Init - Checking API key...');
       print('🔍 dotenv.env keys: ${dotenv.env.keys.toList()}');
       print('🔍 FISH_AUDIO_API_KEY = ${_fishAudioApiKey}');
-      
+
       if (_fishAudioApiKey.isEmpty) {
         print('⚠️ WARNING: FISH_AUDIO_API_KEY is empty at TTS initialization!');
       } else {
         print('✅ FISH_AUDIO_API_KEY loaded successfully');
       }
-      
+
       // Set up TTS parameters for a friendly robot voice
       await _tts.setLanguage("en-US");
       await _tts.setSpeechRate(0.8); // Slightly slower for clarity
@@ -133,10 +133,14 @@ class PixieTextToSpeechService {
       String referenceId = _mapVoiceIdToFishAudioId(voiceId);
       print('🔍 DEBUG: Mapped voiceId "$voiceId" to referenceId "$referenceId"');
 
-      // Structure request payload matching Fish Audio OpenAPI contract
+      // Structure request payload matching Fish Audio OpenAPI contract.
+      // NOTE: "model" must be sent as an HTTP header (per Fish Audio's
+      // documented Quick Start), NOT inside the JSON body. Sending it in the
+      // body causes the server to fall back to a paid model and bill against
+      // account balance, which is why this previously returned 402
+      // Insufficient API credit even though s2.1-pro-free is free via API.
       final Map<String, dynamic> requestBody = {
         "text": text,
-        "model": "s2.1-pro-free", 
         "reference_id": referenceId,
         "format": "mp3",
         "latency": "balanced"
@@ -148,6 +152,7 @@ class PixieTextToSpeechService {
         headers: {
           "Authorization": "Bearer $_fishAudioApiKey",
           "Content-Type": "application/json",
+          "model": "s2.1-pro-free",
         },
         body: jsonEncode(requestBody),
       );
@@ -165,25 +170,25 @@ class PixieTextToSpeechService {
         await _audioPlayer.play(DeviceFileSource(tempFile.path));
         dev.log("▶️ Playing custom voice signature simulation.");
         print('✅ SUCCESS: Playing Fish Audio response');
-      } 
+      }
       else if (response.statusCode == 401) {
         dev.log("❌ [401 Unauthorized]: Invalid API Key. Check your .env setup or Fish Audio dashboard configuration.");
         print('❌ [401] Response: ${response.body}');
         _isSpeaking = false;
         await speak(text); // Fallback to avoid dead app silence
-      } 
+      }
       else if (response.statusCode == 403 || response.statusCode == 404) {
         dev.log("❌ [${response.statusCode} Error]: Voice Character UUID '$referenceId' missing, privatized, or disabled via copyright protection checks.");
         print('❌ [${response.statusCode}] Response: ${response.body}');
         _isSpeaking = false;
         await speak(text); // Fallback to avoid dead app silence
-      } 
+      }
       else if (response.statusCode == 429) {
         dev.log("❌ [429 Rate Limit]: Account API synthesis credits exhausted or frequency limits hit.");
         print('❌ [429] Response: ${response.body}');
         _isSpeaking = false;
         await speak(text); // Fallback to avoid dead app silence
-      } 
+      }
       else {
         dev.log("❌ [${response.statusCode} Server Error]: ${response.body}");
         print('❌ [${response.statusCode}] Response: ${response.body}');
@@ -221,23 +226,46 @@ class PixieTextToSpeechService {
 
   bool get isSpeaking => _isSpeaking;
 
+  /// Diagnostic: Check if voice system is properly configured
+  Future<Map<String, dynamic>> getDiagnostics() async {
+    return {
+      'fish_audio_api_key_present': _fishAudioApiKey.isNotEmpty,
+      'fish_audio_api_key_first_10_chars': _fishAudioApiKey.length > 10
+          ? _fishAudioApiKey.substring(0, 10) + '...'
+          : 'NOT_SET',
+      'is_speaking': _isSpeaking,
+      'tts_available': true,
+    };
+  }
+
   /// Maps your provider string IDs to corresponding Fish Audio Character UUIDs
   String _mapVoiceIdToFishAudioId(String voiceId) {
-    switch (voiceId) {
-      case 'Sarah (American English)': 
-        return 'c8f64deb39914cfca7f47ccfc3bca82f';  // Sarah voice ID
-      case 'glinda': 
-        return 'c8f64deb39914cfca7f47ccfc3bca82f';
-      case 'keanu reeves': 
-        return 'b3f50c9e578f48e9a7db2f86cb3edde8';
-      case 'yuta': 
-        return '633aed63573a4fe7ba4c2ba8c410a0e2';
-      case 'misa':
-        return '651539914d6445d5adf9b203962fc71a';
-      case 'sponge bob':
-        return 'f2e56a18ede949129257ea66be6ef2c2';
-      default: 
-        return 'c8f64deb39914cfca7f47ccfc3bca82f';  // Default to Sarah
+    final normalizedId = voiceId.toLowerCase().trim();
+
+    final voiceMap = {
+      'sarah (american english)': '933563129e564b19a115bedd57b7406a',  // Sarah
+      'ethan': '536d3a5e000945adb7038665781a4aca',
+      'glinda': 'eda92886351842b1818099ca493e99e9', // Glinda alias
+      'keanu reeves': '63c4f882a6a343fc8fb4f9182fbb2bac', // Keanu alias
+      'yuta': '633aed63573a4fe7ba4c2ba8c410a0e2',                     // Yuta
+      'misa': '651539914d6445d5adf9b203962fc71a',          // Misa alias
+      'sponge bob': 'deb5d2b89e3247918d4937d9c0864cca',     // SpongeBob alias
+    };
+
+    if (!voiceMap.containsKey(normalizedId)) {
+      // Previously this fell back to Sarah with zero visible signal, so a
+      // typo'd or renamed voiceId (e.g. from settings_screen.dart) would
+      // silently always play as Sarah. Log it loudly so mismatches like
+      // that are obvious in the console instead of looking like a dead API key.
+      dev.log(
+        '⚠️ Voice Mapping: No Fish Audio match for "$voiceId" '
+        '(normalized: "$normalizedId"). Falling back to Sarah. '
+        'Check that this id matches a key in voiceMap exactly.',
+      );
     }
+
+    final result = voiceMap[normalizedId] ?? 'c8f64deb39914cfca7f47ccfc3bca82f'; // Default to Sarah
+    dev.log('🎤 Voice Mapping: "$voiceId" → UUID: "$result"');
+    return result;
   }
 }
